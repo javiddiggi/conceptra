@@ -1,0 +1,81 @@
+:root {
+  --primary-green: #166534;
+  --dark-green: #14532d;
+  --emerald: #059669;
+  --mint: #d1fae5;
+  --light-mint: #ecfdf5;
+  --light-green: var(--light-mint);
+  --warm-cream: #fffcf5;
+  --white: #ffffff;
+  --gold: #d4a72c;
+  --border-color: #e2e8e3;
+  --background: var(--warm-cream);
+  --text-dark: #17251d;
+  --text-muted: #64746a;
+  --shadow-soft: 0 6px 20px rgba(20, 83, 45, 0.07);
+  --shadow-card-hover: 0 12px 28px rgba(20, 83, 45, 0.12);
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --space-unit: 8px;
+  --container-width: 1320px;
+  --ink: var(--text-dark);
+  --green: var(--primary-green);
+  --green-dark: var(--dark-green);
+  --green-pale: var(--light-green);
+  --muted: var(--text-muted);
+  --line: var(--border-color);
+  --serif: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--white);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+
+  scroll-behavior: smooth;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  line-height: 1.6;
+}
+
+@media (max-width: 320px) {
+  body {
+    min-width: 0;
+  }
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid #73936c;
+  outline-offset: 3px;
+}
+
+::selection {
+  color: #1e3422;
+  background: #dbe8d6;
+}
