@@ -9,6 +9,7 @@ import {
   getClassChapters,
 } from './data/biologyData.js'
 import { getPublicChapterChanges } from './lib/adminContent.js'
+import { filterQuestionsByMode } from './lib/questionFiltering.js'
 import { isSupabaseConfigured } from './lib/supabase.js'
 import './App.css'
 
@@ -412,9 +413,7 @@ function QuestionCard({ question, index }) {
 
 function QuestionsPage({ chapter }) {
   const [questionMode, setQuestionMode] = useState('all')
-  const filteredQuestions = chapter.questions
-    .map((question, index) => ({ question, index }))
-    .filter(({ question }) => questionMode === 'all' || question.questionType === 'NEET PYQ')
+  const filteredQuestions = filterQuestionsByMode(chapter.questions, questionMode)
 
   return (
     <main className="page-main">
@@ -448,18 +447,15 @@ function QuestionsPage({ chapter }) {
             PYQ Only
           </button>
         </div>
-        {chapter.questions.length ? (
-          filteredQuestions.length ? (
-            <div className="questions-list">
-              {filteredQuestions.map(({ question, index }) => <QuestionCard question={question} index={index} key={question.id} />)}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <span className="empty-icon" aria-hidden="true">✳</span>
-              <h2>No NEET PYQs available yet</h2>
-              <p>This chapter has no questions marked as NEET PYQs.</p>
-            </div>
-          )
+        {filteredQuestions.length ? (
+          <div className="questions-list">
+            {filteredQuestions.map(({ question, index }) => <QuestionCard question={question} index={index} key={question.id} />)}
+          </div>
+        ) : questionMode === 'pyq' ? (
+          <div className="empty-state">
+            <span className="empty-icon" aria-hidden="true">✳</span>
+            <h2>No NEET PYQs available for this chapter yet.</h2>
+          </div>
         ) : (
           <div className="empty-state">
             <span className="empty-icon" aria-hidden="true">✳</span>
