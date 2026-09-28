@@ -3,6 +3,7 @@ import { supabase } from './supabase.js'
 const chaptersTable = 'biology_chapters'
 const hiddenChaptersTable = 'hidden_biology_chapters'
 const notesBucket = 'chapter-notes'
+const questionImagesBucket = 'question-images'
 
 function requireSupabase() {
   if (!supabase) {
@@ -82,7 +83,28 @@ export async function getHiddenChapterIds() {
   return data.map((row) => row.id)
 }
 
-export async function saveChapter(chapter, notesFile, { isNew, onIdentityStatus } = {}) {
+function getQuestionImageStoragePath(imageUrl) {
+  if (typeof imageUrl !== 'string' || !imageUrl) return null
+  try {
+    const segments = new URL(imageUrl).pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    const bucketIndex = segments.lastIndexOf(questionImagesBucket)
+    return bucketIndex === -1 ? null : segments.slice(bucketIndex + 1).join('/')
+  } catch {
+    return imageUrl.replace(/^\/+/, '').replace(new RegExp(`^${questionImagesBucket}/`), '') || null
+  }
+}
+
+async function removeUploadedFiles(client, bucket, paths, label) {
+  if (!paths.length) return
+  const { error } = await client.storage.from(bucket).remove(paths)
+  if (error) throw new Error(`${label} cleanup failed: ${error.message}`)
+}
+
+export async function saveChapter(chapter, notesFile, {
+  isNew,
+  onIdentityStatus,
+  previousQuestions = [],
+} = {}) {
   const client = requireSupabase()
   const identityStatus = await getAdminIdentityStatus()
   onIdentityStatus?.(identityStatus)
@@ -94,17 +116,65 @@ export async function saveChapter(chapter, notesFile, { isNew, onIdentityStatus 
   }
 
   let notesPdf = chapter.notesPdf || null
-  let uploadedPath = null
+  let notesUploadedPath = null
+  const questionImageUploads = []
+  const questionImagesToRemove = new Set()
 
   if (notesFile) {
     const safeName = notesFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
-    uploadedPath = `class-${chapter.class}/biology/${chapter.id}/${Date.now()}-${safeName}`
+    notesUploadedPath = `class-${chapter.class}/biology/${chapter.id}/${Date.now()}-${safeName}`
     const { error: uploadError } = await client.storage
       .from(notesBucket)
-      .upload(uploadedPath, notesFile, { contentType: 'application/pdf', upsert: true })
+      .upload(notesUploadedPath, notesFile, { contentType: 'application/pdf', upsert: true })
     if (uploadError) throw new Error(`Notes PDF upload failed: ${uploadError.message}`)
-    const { data } = client.storage.from(notesBucket).getPublicUrl(uploadedPath)
+    const { data } = client.storage.from(notesBucket).getPublicUrl(notesUploadedPath)
     notesPdf = data.publicUrl
+  }
+
+  let questions
+  try {
+    questions = []
+    for (const [index, question] of chapter.questions.entries()) {
+      const { imageFile, imageRemoved, imageUrl: existingImageUrl, ...questionData } = question
+      let imageUrl = imageRemoved ? null : existingImageUrl || null
+
+      if (imageFile) {
+        const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
+        const safeQuestionId = String(question.id ?? index + 1).replace(/[^a-zA-Z0-9_-]/g, '-')
+        const imagePath = `${chapter.id}/${safeQuestionId}/${Date.now()}-${index}-${safeName}`
+        const { error: uploadError } = await client.storage
+          .from(questionImagesBucket)
+          .upload(imagePath, imageFile, { contentType: imageFile.type, upsert: false })
+        if (uploadError) throw new Error(`Question ${index + 1} image upload failed: ${uploadError.message}`)
+        questionImageUploads.push(imagePath)
+        imageUrl = client.storage.from(questionImagesBucket).getPublicUrl(imagePath).data.publicUrl
+      }
+
+      if ((imageFile || imageRemoved) && existingImageUrl) {
+        const oldImagePath = getQuestionImageStoragePath(existingImageUrl)
+        if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+      }
+      questions.push({ ...questionData, ...(imageUrl ? { imageUrl } : {}) })
+    }
+    const retainedImageUrls = new Set(questions.map((question) => question.imageUrl).filter(Boolean))
+    previousQuestions.forEach((question) => {
+      if (!question.imageUrl || retainedImageUrls.has(question.imageUrl)) return
+      const oldImagePath = getQuestionImageStoragePath(question.imageUrl)
+      if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+    })
+  } catch (error) {
+    const cleanupErrors = []
+    try {
+      await removeUploadedFiles(client, questionImagesBucket, questionImageUploads, 'Question image')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
+    }
+    try {
+      await removeUploadedFiles(client, notesBucket, notesUploadedPath ? [notesUploadedPath] : [], 'Notes PDF')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
+    }
+    throw new Error(`${error.message}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`, { cause: error })
   }
 
   const row = {
@@ -116,7 +186,7 @@ export async function saveChapter(chapter, notesFile, { isNew, onIdentityStatus 
     description: chapter.description.trim(),
     youtube_url: chapter.youtubeUrl.trim(),
     notes_pdf: notesPdf,
-    questions: chapter.questions,
+    questions,
     is_published: true,
   }
   const saveQuery = isNew
@@ -124,17 +194,28 @@ export async function saveChapter(chapter, notesFile, { isNew, onIdentityStatus 
     : client.from(chaptersTable).update(row).eq('id', chapter.id)
   const { error: saveError } = await saveQuery
   if (saveError) {
-    if (uploadedPath) {
-      const { error: cleanupError } = await client.storage.from(notesBucket).remove([uploadedPath])
-      if (cleanupError) {
-        throw new Error(`${saveError.message} The uploaded PDF could not be removed: ${cleanupError.message}`)
-      }
+    const cleanupErrors = []
+    try {
+      await removeUploadedFiles(client, questionImagesBucket, questionImageUploads, 'Question image')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
     }
-    throw new Error(`Chapter row save failed: ${saveError.message}`)
+    try {
+      await removeUploadedFiles(client, notesBucket, notesUploadedPath ? [notesUploadedPath] : [], 'Notes PDF')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
+    }
+    throw new Error(`Chapter row save failed: ${saveError.message}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
   }
 
   const { error: restoreError } = await client.from(hiddenChaptersTable).delete().eq('id', chapter.id)
   if (restoreError) throw new Error(`Chapter saved, but its hidden status could not be cleared: ${restoreError.message}`)
+
+  try {
+    await removeUploadedFiles(client, questionImagesBucket, [...questionImagesToRemove], 'Old question image')
+  } catch (error) {
+    throw new Error(`Chapter saved, but ${error.message}`, { cause: error })
+  }
 }
 
 export async function hideChapter(chapterId) {

@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 
 const optionLabels = ['A', 'B', 'C', 'D']
+const maxQuestionImageSize = 10 * 1024 * 1024
+const questionImageTypes = ['image/png', 'image/jpeg', 'image/webp']
 
 function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
   const questionRefs = useRef(new Map())
+  const imagePreviewUrls = useRef(new Map())
   const [pendingFocusId, setPendingFocusId] = useState(null)
+  const [imageErrors, setImageErrors] = useState({})
+  const [imagePreviews, setImagePreviews] = useState({})
 
   useEffect(() => {
     if (pendingFocusId === null) return
@@ -17,6 +22,10 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
     setPendingFocusId(null)
   }, [pendingFocusId, questions])
 
+  useEffect(() => () => {
+    imagePreviewUrls.current.forEach((url) => URL.revokeObjectURL(url))
+  }, [])
+
   function updateQuestion(index, field, value) {
     onChange(questions.map((question, questionIndex) =>
       questionIndex === index
@@ -27,6 +36,42 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
         }
         : question,
     ))
+  }
+
+  function updateQuestionImage(index, file) {
+    const question = questions[index]
+    const previousPreview = imagePreviewUrls.current.get(question.id)
+    if (previousPreview) URL.revokeObjectURL(previousPreview)
+    imagePreviewUrls.current.delete(question.id)
+    if (file) imagePreviewUrls.current.set(question.id, URL.createObjectURL(file))
+    setImagePreviews((previews) => {
+      const nextPreviews = { ...previews }
+      if (file) nextPreviews[question.id] = imagePreviewUrls.current.get(question.id)
+      else delete nextPreviews[question.id]
+      return nextPreviews
+    })
+
+    onChange(questions.map((item, questionIndex) =>
+      questionIndex === index
+        ? { ...item, imageFile: file, imageRemoved: false }
+        : item,
+    ))
+  }
+
+  function handleQuestionImageChange(index, event) {
+    const file = event.target.files?.[0] || null
+    if (file && !questionImageTypes.includes(file.type)) {
+      setImageErrors((errors) => ({ ...errors, [questions[index].id]: 'Choose a PNG, JPG, JPEG, or WEBP image.' }))
+      event.target.value = ''
+      return
+    }
+    if (file && file.size > maxQuestionImageSize) {
+      setImageErrors((errors) => ({ ...errors, [questions[index].id]: 'Choose an image no larger than 10 MB.' }))
+      event.target.value = ''
+      return
+    }
+    setImageErrors((errors) => ({ ...errors, [questions[index].id]: '' }))
+    updateQuestionImage(index, file)
   }
 
   function updateOption(questionIndex, optionIndex, value) {
@@ -65,6 +110,15 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
   }
 
   function removeQuestion(index) {
+    const question = questions[index]
+    const previewUrl = imagePreviewUrls.current.get(question.id)
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    imagePreviewUrls.current.delete(question.id)
+    setImagePreviews((previews) => {
+      const nextPreviews = { ...previews }
+      delete nextPreviews[question.id]
+      return nextPreviews
+    })
     onChange(questions.filter((_, questionIndex) => questionIndex !== index))
   }
 
@@ -122,6 +176,59 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
                 required
               />
             </label>
+            <div className="admin-field admin-field-wide question-image-field">
+              <label htmlFor={`question-image-${question.id}`}>Question Image (Optional)</label>
+              <input
+                id={`question-image-${question.id}`}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                onChange={(event) => handleQuestionImageChange(index, event)}
+              />
+              <span className="admin-hint">PNG, JPG, or WEBP · up to 10 MB.</span>
+              {imageErrors[question.id] && <span className="admin-error" role="alert">{imageErrors[question.id]}</span>}
+              {question.imageRemoved ? (
+                <div className="question-image-preview-actions">
+                  <span className="admin-hint">The attached image will be removed when you publish.</span>
+                  {question.imageUrl && (
+                    <button
+                      className="admin-link-button"
+                      type="button"
+                      onClick={() => updateQuestion(index, 'imageRemoved', false)}
+                    >
+                      Keep existing image
+                    </button>
+                  )}
+                </div>
+              ) : (imagePreviews[question.id] || question.imageUrl) && (
+                <div className="question-image-preview">
+                  <img
+                    src={imagePreviews[question.id] || question.imageUrl}
+                    alt={`Preview for question ${index + 1}`}
+                  />
+                  <button
+                    className="admin-link-button admin-danger-link"
+                    type="button"
+                    onClick={() => {
+                      const previewUrl = imagePreviewUrls.current.get(question.id)
+                      if (previewUrl) URL.revokeObjectURL(previewUrl)
+                      imagePreviewUrls.current.delete(question.id)
+                      setImagePreviews((previews) => {
+                        const nextPreviews = { ...previews }
+                        delete nextPreviews[question.id]
+                        return nextPreviews
+                      })
+                      onChange(questions.map((item, questionIndex) =>
+                        questionIndex === index
+                          ? { ...item, imageFile: null, imageRemoved: true }
+                          : item,
+                      ))
+                    }}
+                  >
+                    Remove image
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="admin-options-grid">
               {question.options.map((option, optionIndex) => (
                 <label className="admin-field" key={optionLabels[optionIndex]}>

@@ -194,6 +194,36 @@
   outline: 0;
 }
 
+.question-image-field > label {
+  color: #39483e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.question-image-preview {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.question-image-preview img {
+  display: block;
+  width: min(100%, 240px);
+  max-height: 150px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.question-image-preview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+}
+
 .admin-button {
   min-height: 42px;
   display: inline-flex;

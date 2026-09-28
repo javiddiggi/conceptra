@@ -124,6 +124,29 @@ create policy "Admins can delete chapter PDFs"
   on storage.objects for delete to authenticated
   using (bucket_id = 'chapter-notes' and public.is_conceptra_admin());
 
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('question-images', 'question-images', true, 10485760, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Admins can upload question images" on storage.objects;
+create policy "Admins can upload question images"
+  on storage.objects for insert to authenticated
+  with check (bucket_id = 'question-images' and public.is_conceptra_admin());
+
+drop policy if exists "Admins can update question images" on storage.objects;
+create policy "Admins can update question images"
+  on storage.objects for update to authenticated
+  using (bucket_id = 'question-images' and public.is_conceptra_admin())
+  with check (bucket_id = 'question-images' and public.is_conceptra_admin());
+
+drop policy if exists "Admins can delete question images" on storage.objects;
+create policy "Admins can delete question images"
+  on storage.objects for delete to authenticated
+  using (bucket_id = 'question-images' and public.is_conceptra_admin());
+
 -- After creating the owner account in Supabase Auth, authorize it with:
 -- insert into public.admin_users (user_id)
 -- select id from auth.users where email = 'owner@example.com';

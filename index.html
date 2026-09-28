@@ -7,6 +7,18 @@
     <meta name="theme-color" content="#fbfcf8" />
     <meta name="description" content="Chapter-wise Biology notes, questions and concept videos for Class 11 and Class 12." />
     <title>Conceptra — Learn Biology, Understand Concepts</title>
+    <script>
+      try {
+        const theme = localStorage.getItem('conceptra-theme')
+        const isAdminRoute = location.pathname === '/admin' || location.pathname === '/admin/login'
+        if (!isAdminRoute && (theme === 'dark' || theme === 'light')) {
+          document.documentElement.dataset.theme = theme
+          document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#111814' : '#fbfcf8'
+        }
+      } catch {
+        // The site defaults to light mode when browser storage is unavailable.
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

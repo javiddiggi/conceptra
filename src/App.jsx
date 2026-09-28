@@ -355,6 +355,11 @@ function QuestionCard({ question, index }) {
         {question.questionType !== 'Practice' && question.neetYear && <span className="question-year">NEET {question.neetYear}</span>}
       </div>
       <h2>{question.question}</h2>
+      {question.imageUrl && (
+        <div className="question-image">
+          <img src={question.imageUrl} alt={`Diagram for question ${index + 1}`} loading="lazy" />
+        </div>
+      )}
       <div className="question-options">
         {question.options.map((option) => (
           <label

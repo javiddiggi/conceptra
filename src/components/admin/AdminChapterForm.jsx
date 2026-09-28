@@ -110,6 +110,7 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
       }, notesFile, {
         isNew: !chapter || typeof chapter.isPublished === 'undefined',
         onIdentityStatus,
+        previousQuestions: chapter?.questions || [],
       })
       await onSaved()
     } catch (saveError) {
