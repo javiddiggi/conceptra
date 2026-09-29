@@ -3115,6 +3115,20 @@
   gap: 12px;
 }
 
+.question-topic-group {
+  display: grid;
+  gap: 10px;
+}
+
+.question-topic-group-heading {
+  margin: 4px 0 0;
+}
+
+.question-topic-group-list {
+  display: grid;
+  gap: 12px;
+}
+
 .question-card {
   padding: 19px 21px;
 }

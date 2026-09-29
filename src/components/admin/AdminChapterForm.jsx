@@ -1,5 +1,9 @@
 import { useRef, useState } from 'react'
 import { saveChapter } from '../../lib/adminContent.js'
+import {
+  assignMissingQuestionTopics,
+  inheritQuestionTopicsAtPosition,
+} from '../../lib/questionTopics.js'
 import QuestionEditor from './QuestionEditor.jsx'
 
 const maxNotesPdfSize = 50 * 1024 * 1024
@@ -24,7 +28,7 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
   const [youtubeUrl, setYoutubeUrl] = useState(chapter?.youtubeUrl || '')
   const [notesPdf, setNotesPdf] = useState(chapter?.notesPdf || '')
   const [notesFile, setNotesFile] = useState(null)
-  const [questions, setQuestions] = useState(chapter?.questions || [])
+  const [questions, setQuestions] = useState(() => assignMissingQuestionTopics(chapter?.questions || []))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -97,13 +101,16 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
         description,
         youtubeUrl,
         notesPdf,
-        questions: questions.map((question) => {
-          const { answer, ...questionData } = question
+        questions: inheritQuestionTopicsAtPosition(questions).map((question) => {
+          const questionData = { ...question }
+          const answer = questionData.answer
+          delete questionData.answer
+          delete questionData.isDraft
+          delete questionData.defaultTopic
           return {
             ...questionData,
             correctAnswer: question.correctAnswer ?? answer,
             questionType: question.questionType || 'NEET PYQ',
-            topic: question.topic?.trim() || '',
             neetYear: question.questionType === 'Practice' ? '' : question.neetYear || '',
           }
         }),

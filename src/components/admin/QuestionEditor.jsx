@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  assignMissingQuestionTopics,
+  flattenQuestionGroups,
+  groupQuestionsByTopic,
+} from '../../lib/questionTopics.js'
 
 const optionLabels = ['A', 'B', 'C', 'D']
 const maxQuestionImageSize = 10 * 1024 * 1024
@@ -27,7 +32,7 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
   }, [])
 
   function updateQuestion(index, field, value) {
-    onChange(questions.map((question, questionIndex) =>
+    const updatedQuestions = questions.map((question, questionIndex) =>
       questionIndex === index
         ? {
           ...question,
@@ -35,7 +40,12 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
           ...(field === 'questionType' && value === 'Practice' ? { neetYear: '' } : {}),
         }
         : question,
-    ))
+    )
+    if (field === 'topic' && value.trim()) {
+      onChange(flattenQuestionGroups(groupQuestionsByTopic(updatedQuestions)))
+      return
+    }
+    onChange(updatedQuestions)
   }
 
   function updateQuestionImage(index, file) {
@@ -88,24 +98,27 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
     ))
   }
 
-  function addQuestion() {
+  function addQuestion(topicAbove = '', insertionIndex = questions.length) {
     const existingIds = new Set(questions.map((question) => String(question.id)))
-    let id = Date.now()
+    let id = questions.length + 1
     while (existingIds.has(String(id))) id += 1
 
-    onChange([
-      ...questions,
-      {
-        id,
-        question: '',
-        options: ['', '', '', ''],
-        correctAnswer: '',
-        explanation: '',
-        questionType: 'NEET PYQ',
-        topic: '',
-        neetYear: '',
-      },
-    ])
+    const orderedQuestions = flattenQuestionGroups(groupQuestionsByTopic(questions))
+    const precedingTopic = orderedQuestions[insertionIndex - 1]?.topic?.trim()
+    const newQuestion = {
+      id,
+      question: '',
+      options: ['', '', '', ''],
+      correctAnswer: '',
+      explanation: '',
+      questionType: 'NEET PYQ',
+      topic: '',
+      neetYear: '',
+      isDraft: true,
+      defaultTopic: precedingTopic || topicAbove || 'General',
+    }
+    orderedQuestions.splice(insertionIndex, 0, newQuestion)
+    onChange(orderedQuestions)
     setPendingFocusId(id)
   }
 
@@ -122,13 +135,17 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
     onChange(questions.filter((_, questionIndex) => questionIndex !== index))
   }
 
-  function renderAddQuestionButton() {
+  function renderAddQuestionButton(topicAbove = '', insertionIndex = questions.length) {
     return (
-      <button className="admin-button admin-button-primary" type="button" onClick={addQuestion} disabled={saving}>
+      <button className="admin-button admin-button-primary" type="button" onClick={() => addQuestion(topicAbove, insertionIndex)} disabled={saving}>
         + Add Question
       </button>
     )
   }
+
+  const questionsWithTopics = assignMissingQuestionTopics(questions)
+  const topicGroups = groupQuestionsByTopic(questionsWithTopics)
+  const existingTopics = topicGroups.map((group) => group.topic)
 
   return (
     <section className="admin-form-section">
@@ -138,11 +155,28 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
           <h3>Questions</h3>
           <span className="admin-question-count">{questions.length} {questions.length === 1 ? 'question' : 'questions'}</span>
         </div>
-        {renderAddQuestionButton()}
       </div>
-      {questions.length === 0 && <p className="admin-hint">No questions added yet.</p>}
+      {questions.length === 0 && (
+        <div className="admin-question-empty">
+          <p className="admin-hint">No questions added yet.</p>
+          {renderAddQuestionButton()}
+        </div>
+      )}
+      <datalist id="admin-question-topic-options">
+        {existingTopics.map((topic) => <option key={topic} value={topic} />)}
+      </datalist>
       <div className="admin-question-list">
-        {questions.map((question, index) => (
+        {topicGroups.map((group, groupIndex) => {
+          const insertionIndex = topicGroups
+            .slice(0, groupIndex + 1)
+            .reduce((count, topicGroup) => count + topicGroup.questions.length, 0)
+          const hasTopicSection = group.questions.some(({ index }) =>
+            !questions[index].isDraft || questions[index].topic?.trim(),
+          )
+          return (
+          <section className="admin-question-topic-group" key={group.topicKey || 'untitled'}>
+            {hasTopicSection && <h4 className="admin-question-topic-heading">{group.topic}</h4>}
+            {group.questions.map(({ question, index }, topicIndex) => (
           <fieldset
             className="admin-question-editor"
             key={question.id}
@@ -152,7 +186,7 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
             }}
           >
             <div className="admin-question-heading">
-              <legend>Question {String(index + 1).padStart(2, '0')}</legend>
+              <legend>Question {String(topicIndex + 1).padStart(2, '0')}</legend>
               <button className="admin-link-button admin-danger-link" type="button" onClick={() => removeQuestion(index)}>
                 Remove Question
               </button>
@@ -161,7 +195,8 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
               Topic
               <input
                 data-question-topic
-                value={question.topic ?? ''}
+                list="admin-question-topic-options"
+                value={questions[index].topic ?? ''}
                 onChange={(event) => updateQuestion(index, 'topic', event.target.value)}
                 placeholder="e.g. Cell Structure, Chordata, Genetics"
               />
@@ -297,11 +332,17 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
               <span className="admin-hint">Saves by publishing the complete chapter with all current edits.</span>
             </div>
           </fieldset>
-        ))}
+            ))}
+            {hasTopicSection && groupIndex < topicGroups.length - 1
+              && renderAddQuestionButton(group.topic, insertionIndex)}
+          </section>
+          )
+        })}
       </div>
-      <div className="admin-question-add-bottom">
-        {renderAddQuestionButton()}
-      </div>
+      {questions.length > 0 && renderAddQuestionButton(
+        topicGroups[topicGroups.length - 1]?.topic || '',
+        flattenQuestionGroups(topicGroups).length,
+      )}
     </section>
   )
 }

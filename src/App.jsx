@@ -10,6 +10,7 @@ import {
 } from './data/biologyData.js'
 import { getPublicChapterChanges } from './lib/adminContent.js'
 import { filterQuestionsByMode } from './lib/questionFiltering.js'
+import { groupQuestionsByTopic } from './lib/questionTopics.js'
 import { isSupabaseConfigured } from './lib/supabase.js'
 import './App.css'
 
@@ -327,7 +328,7 @@ function ChapterPage({ chapter }) {
   )
 }
 
-function QuestionCard({ question, index }) {
+function QuestionCard({ question, index, showTopic = true }) {
   const [selectedOption, setSelectedOption] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [selectionError, setSelectionError] = useState(false)
@@ -345,7 +346,7 @@ function QuestionCard({ question, index }) {
 
   return (
     <article className={`question-card${submitted ? ' question-submitted' : ''}`}>
-      {question.topic?.trim() && (
+      {showTopic && question.topic?.trim() && (
         <div className="question-topic">
           <span>TOPIC</span>
           <strong>{question.topic}</strong>
@@ -414,6 +415,7 @@ function QuestionCard({ question, index }) {
 function QuestionsPage({ chapter }) {
   const [questionMode, setQuestionMode] = useState('all')
   const filteredQuestions = filterQuestionsByMode(chapter.questions, questionMode)
+  const topicGroups = groupQuestionsByTopic(filteredQuestions.map(({ question }) => question))
 
   return (
     <main className="page-main">
@@ -449,7 +451,21 @@ function QuestionsPage({ chapter }) {
         </div>
         {filteredQuestions.length ? (
           <div className="questions-list">
-            {filteredQuestions.map(({ question, index }) => <QuestionCard question={question} index={index} key={question.id} />)}
+            {topicGroups.map((group) => (
+              <section className="question-topic-group" key={group.topicKey || 'untitled'}>
+                {group.topic && (
+                  <div className="question-topic question-topic-group-heading">
+                    <span>TOPIC</span>
+                    <strong>{group.topic}</strong>
+                  </div>
+                )}
+                <div className="question-topic-group-list">
+                  {group.questions.map(({ question }, topicIndex) => (
+                    <QuestionCard question={question} index={topicIndex} showTopic={false} key={question.id} />
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         ) : questionMode === 'pyq' ? (
           <div className="empty-state">
