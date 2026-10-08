@@ -86,13 +86,6 @@ function Breadcrumbs({ items }) {
 }
 
 function HomePage({ chapters }) {
-  const whatYouGet = [
-    { icon: '🎬', title: 'Animated Concept Videos', description: 'Understand difficult concepts visually.' },
-    { icon: '📖', title: 'Handwritten Notes', description: 'Revise concepts with clean chapter-wise notes.' },
-    { icon: '📝', title: 'NEET PYQs', description: 'Practice previous-year NEET questions.' },
-    { icon: '⚡', title: 'Exam-Focused Learning', description: 'Focus on concepts, important points and quick revision.' },
-  ]
-
   return (
     <main className="home-page-shell">
       <section className="home-hero">
@@ -107,6 +100,32 @@ function HomePage({ chapters }) {
           </div>
           <div className="hero-proof"><span className="proof-mark">✓</span> Visual learning for NEET-ready biology mastery</div>
         </div>
+      </section>
+
+      <section className="youtube-announcement section-wrap" aria-labelledby="youtube-announcement-title">
+        <div className="youtube-announcement-copy">
+          <span className="youtube-announcement-label">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <rect x="2.25" y="4.25" width="15.5" height="11.5" rx="3" stroke="currentColor" strokeWidth="1.5" />
+              <path d="m8 7 5 3-5 3z" fill="currentColor" />
+            </svg>
+            🚀 NEW ON YOUTUBE
+          </span>
+          <h2 id="youtube-announcement-title">Learn Biology. Visualize Every Concept.</h2>
+          <p>Watch Conceptra&apos;s visual Biology lessons, NEET-focused concepts, animations, PYQs and exam-focused explanations.</p>
+        </div>
+        <a
+          className="button button-primary youtube-announcement-button"
+          href="https://www.youtube.com/@CONCEPTRAAA"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <rect x="2.25" y="4.25" width="15.5" height="11.5" rx="3" stroke="currentColor" strokeWidth="1.5" />
+            <path d="m8 7 5 3-5 3z" fill="currentColor" />
+          </svg>
+          Subscribe on YouTube
+        </a>
       </section>
 
       <section className="class-picker section-wrap" id="choose-class">
@@ -137,35 +156,6 @@ function HomePage({ chapters }) {
         </div>
       </section>
 
-      <section className="offers-section section-wrap">
-        <div className="section-heading head-center">
-          <div>
-            <div className="eyebrow">WHAT YOU GET</div>
-            <h2>Everything You Need for Biology</h2>
-          </div>
-        </div>
-
-        <div className="offer-grid">
-          {whatYouGet.map((item) => (
-            <article className="offer-card" key={item.title}>
-              <div className="offer-icon" aria-hidden="true">{item.icon}</div>
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="final-cta-wrap">
-        <div className="final-cta section-wrap">
-          <div className="final-cta-copy">
-            <p>Visualize the concept.</p>
-            <p>Understand the chapter.</p>
-            <p>Master the question.</p>
-          </div>
-          <a className="button button-primary" href="#choose-class">Start Learning <ArrowIcon /></a>
-        </div>
-      </section>
     </main>
   )
 }

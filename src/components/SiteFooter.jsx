@@ -12,6 +12,7 @@ function SiteFooter() {
           <a href="/">Home</a>
           <a href="/class-11">Class 11</a>
           <a href="/class-12">Class 12</a>
+          <a href="https://www.youtube.com/@CONCEPTRAAA" target="_blank" rel="noopener noreferrer">YouTube</a>
         </nav>
         <div className="footer-meta">
           <a className="admin-login-link" href="/admin/login">Admin Login</a>
