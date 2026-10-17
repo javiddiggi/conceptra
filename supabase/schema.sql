@@ -6,7 +6,7 @@ create table if not exists public.admin_users (
 create table if not exists public.biology_chapters (
   id text primary key,
   class_number smallint not null check (class_number in (11, 12)),
-  subject text not null default 'Biology' check (subject = 'Biology'),
+  subject text not null default 'Biology' check (subject in ('Biology', 'Physics', 'Chemistry')),
   chapter_number integer not null check (chapter_number > 0),
   title text not null check (length(trim(title)) > 0),
   description text not null default '',
@@ -100,6 +100,41 @@ grant select on public.hidden_biology_chapters to anon, authenticated;
 grant select on public.admin_users to authenticated;
 revoke all on function public.is_conceptra_admin() from public, anon;
 grant execute on function public.is_conceptra_admin() to authenticated;
+
+create or replace function public.append_chapter_questions(
+  target_chapter_id text,
+  new_questions jsonb
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  updated_questions jsonb;
+begin
+  if not public.is_conceptra_admin() then
+    raise exception 'Administrator access required';
+  end if;
+  if jsonb_typeof(new_questions) <> 'array' or jsonb_array_length(new_questions) = 0 then
+    raise exception 'At least one question is required';
+  end if;
+
+  update public.biology_chapters
+  set questions = questions || new_questions,
+      updated_at = now()
+  where id = target_chapter_id
+  returning questions into updated_questions;
+
+  if updated_questions is null then
+    raise exception 'Chapter not found';
+  end if;
+  return updated_questions;
+end;
+$$;
+
+revoke all on function public.append_chapter_questions(text, jsonb) from public, anon;
+grant execute on function public.append_chapter_questions(text, jsonb) to authenticated;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('chapter-notes', 'chapter-notes', true, 52428800, array['application/pdf'])

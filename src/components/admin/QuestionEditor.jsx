@@ -4,17 +4,28 @@ import {
   flattenQuestionGroups,
   groupQuestionsByTopic,
 } from '../../lib/questionTopics.js'
+import { examCategories, getQuestionExamCategory, getQuestionExamYear } from '../../lib/questionFiltering.js'
+import { validateQuestionEdit } from '../../lib/questionEdits.js'
 
 const optionLabels = ['A', 'B', 'C', 'D']
 const maxQuestionImageSize = 10 * 1024 * 1024
 const questionImageTypes = ['image/png', 'image/jpeg', 'image/webp']
 
-function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
+function orderQuestionsByTopic(questions) {
+  return groupQuestionsByTopic(questions)
+    .flatMap((group) => group.questions.map(({ index }) => questions[index]))
+}
+
+function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQuestion, saving, children, subject = 'Biology' }) {
   const questionRefs = useRef(new Map())
   const imagePreviewUrls = useRef(new Map())
   const [pendingFocusId, setPendingFocusId] = useState(null)
   const [imageErrors, setImageErrors] = useState({})
   const [imagePreviews, setImagePreviews] = useState({})
+  const solutionPreviewUrls = useRef(new Map())
+  const [editingQuestionId, setEditingQuestionId] = useState(null)
+  const [editingQuestion, setEditingQuestion] = useState(null)
+  const [editErrors, setEditErrors] = useState([])
 
   useEffect(() => {
     if (pendingFocusId === null) return
@@ -29,23 +40,151 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
 
   useEffect(() => () => {
     imagePreviewUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    solutionPreviewUrls.current.forEach((url) => URL.revokeObjectURL(url))
   }, [])
 
   function updateQuestion(index, field, value) {
-    const updatedQuestions = questions.map((question, questionIndex) =>
-      questionIndex === index
+    const target = questions[index]
+    const isEditingSavedQuestion = !target.isDraft && String(target.id) === editingQuestionId
+    const update = (question) => ({
+      ...question,
+      [field]: value,
+      ...(field === 'correctAnswer' && Object.hasOwn(question, 'answer') ? { answer: value } : {}),
+      ...(field === 'examYear' && Object.hasOwn(question, 'neetYear') ? { neetYear: value } : {}),
+      ...(field === 'examCategory'
         ? {
-          ...question,
-          [field]: value,
-          ...(field === 'questionType' && value === 'Practice' ? { neetYear: '' } : {}),
+          questionType: value === 'Practice' ? 'Practice'
+            : value === 'NEET' ? 'NEET PYQ'
+              : value === 'JEE Main' ? 'JEE Main PYQ'
+                : value === 'JEE Advanced' ? 'JEE Advanced PYQ' : '',
+          ...(value === 'Practice' ? { examYear: '', neetYear: '' } : {}),
         }
-        : question,
+        : {}),
+    })
+    if (isEditingSavedQuestion) {
+      setEditingQuestion((question) => update(question))
+      setEditErrors([])
+      return
+    }
+    if (!target.isDraft) return
+    const updatedQuestions = questions.map((question, questionIndex) =>
+      questionIndex === index ? update(question) : question,
     )
     if (field === 'topic' && value.trim()) {
-      onChange(flattenQuestionGroups(groupQuestionsByTopic(updatedQuestions)))
+      onChange(orderQuestionsByTopic(updatedQuestions))
       return
     }
     onChange(updatedQuestions)
+  }
+
+  function updateQuestionData(index, update) {
+    const target = questions[index]
+    if (target.isDraft) {
+      onChange(questions.map((question, questionIndex) =>
+        questionIndex === index ? update(question) : question,
+      ))
+      return
+    }
+    if (String(target.id) === editingQuestionId) {
+      setEditingQuestion((question) => update(question))
+    }
+  }
+
+  function startEditing(question) {
+    setEditingQuestionId(String(question.id))
+    setEditingQuestion({ ...question })
+    setEditErrors([])
+  }
+
+  function clearEditingPreviews(questionId) {
+    const key = String(questionId)
+    const imagePreview = imagePreviewUrls.current.get(questionId)
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    imagePreviewUrls.current.delete(questionId)
+    const solutionPreview = solutionPreviewUrls.current.get(key)
+    if (solutionPreview) URL.revokeObjectURL(solutionPreview)
+    solutionPreviewUrls.current.delete(key)
+    setImagePreviews((previews) => {
+      const nextPreviews = { ...previews }
+      delete nextPreviews[questionId]
+      delete nextPreviews[`${key}-solution`]
+      return nextPreviews
+    })
+  }
+
+  function cancelEditing(question) {
+    if (!question.isDraft) {
+      clearEditingPreviews(question.id)
+      setEditingQuestionId(null)
+      setEditingQuestion(null)
+      setEditErrors([])
+      setImageErrors((errors) => {
+        const nextErrors = { ...errors }
+        delete nextErrors[question.id]
+        delete nextErrors[`${question.id}-solution`]
+        return nextErrors
+      })
+      return
+    }
+    removeQuestion(questions.findIndex((item) => item.id === question.id))
+  }
+
+  async function saveExistingQuestion(question) {
+    const errors = validateQuestionEdit(editingQuestion, subject)
+    if (errors.length) {
+      setEditErrors(errors)
+      return
+    }
+    setEditErrors([])
+    try {
+      await onSaveExistingQuestion(question.id, editingQuestion)
+      clearEditingPreviews(question.id)
+      setImageErrors((errors) => {
+        const nextErrors = { ...errors }
+        delete nextErrors[question.id]
+        delete nextErrors[`${question.id}-solution`]
+        return nextErrors
+      })
+      setEditingQuestionId(null)
+      setEditingQuestion(null)
+    } catch (error) {
+      setEditErrors([error.message || 'Question changes could not be saved.'])
+    }
+  }
+
+  function updateSolutionImage(index, file) {
+    const question = questions[index]
+    const key = String(question.id)
+    const previousPreview = solutionPreviewUrls.current.get(key)
+    if (previousPreview) URL.revokeObjectURL(previousPreview)
+    solutionPreviewUrls.current.delete(key)
+    const nextPreview = file ? URL.createObjectURL(file) : ''
+    if (nextPreview) solutionPreviewUrls.current.set(key, nextPreview)
+    const previewKey = `${key}-solution`
+    setImagePreviews((previews) => {
+      const nextPreviews = { ...previews }
+      if (nextPreview) nextPreviews[previewKey] = nextPreview
+      else delete nextPreviews[previewKey]
+      return nextPreviews
+    })
+    updateQuestionData(index, (item) => ({ ...item, solutionImageFile: file, solutionImageRemoved: false }))
+  }
+
+  function handleSolutionImageChange(index, event) {
+    const file = event.target.files?.[0] || null
+    const errorKey = `${questions[index].id}-solution`
+    if (file && !questionImageTypes.includes(file.type)) {
+      setImageErrors((errors) => ({ ...errors, [errorKey]: 'Choose a PNG, JPG, JPEG, or WEBP image.' }))
+      event.target.value = ''
+      return
+    }
+    if (file && file.size > maxQuestionImageSize) {
+      setImageErrors((errors) => ({ ...errors, [errorKey]: 'Choose an image no larger than 10 MB.' }))
+      event.target.value = ''
+      return
+    }
+    setImageErrors((errors) => ({ ...errors, [errorKey]: '' }))
+    updateSolutionImage(index, file)
   }
 
   function updateQuestionImage(index, file) {
@@ -61,11 +200,7 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
       return nextPreviews
     })
 
-    onChange(questions.map((item, questionIndex) =>
-      questionIndex === index
-        ? { ...item, imageFile: file, imageRemoved: false }
-        : item,
-    ))
+    updateQuestionData(index, (item) => ({ ...item, imageFile: file, imageRemoved: false }))
   }
 
   function handleQuestionImageChange(index, event) {
@@ -85,17 +220,23 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
   }
 
   function updateOption(questionIndex, optionIndex, value) {
-    const question = questions[questionIndex]
+    const originalQuestion = questions[questionIndex]
+    const question = !originalQuestion.isDraft && String(originalQuestion.id) === editingQuestionId
+      ? editingQuestion
+      : originalQuestion
+    if (!originalQuestion.isDraft && String(originalQuestion.id) !== editingQuestionId) return
     const correctAnswer = question.correctAnswer ?? question.answer
     const previousValue = question.options[optionIndex]
     const options = question.options.map((option, index) =>
       index === optionIndex ? value : option,
     )
-    onChange(questions.map((item, index) =>
-      index === questionIndex
-        ? { ...item, options, correctAnswer: correctAnswer && correctAnswer === previousValue ? value : correctAnswer }
-        : item,
-    ))
+    const nextAnswer = correctAnswer && correctAnswer === previousValue ? value : correctAnswer
+    updateQuestionData(questionIndex, (item) => ({
+      ...item,
+      options,
+      correctAnswer: nextAnswer,
+      ...(Object.hasOwn(item, 'answer') ? { answer: nextAnswer } : {}),
+    }))
   }
 
   function addQuestion(topicAbove = '', insertionIndex = questions.length) {
@@ -103,7 +244,7 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
     let id = questions.length + 1
     while (existingIds.has(String(id))) id += 1
 
-    const orderedQuestions = flattenQuestionGroups(groupQuestionsByTopic(questions))
+    const orderedQuestions = orderQuestionsByTopic(questions)
     const precedingTopic = orderedQuestions[insertionIndex - 1]?.topic?.trim()
     const newQuestion = {
       id,
@@ -112,8 +253,9 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
       correctAnswer: '',
       explanation: '',
       questionType: 'NEET PYQ',
+      examCategory: 'NEET',
       topic: '',
-      neetYear: '',
+      examYear: '',
       isDraft: true,
       defaultTopic: precedingTopic || topicAbove || 'General',
     }
@@ -127,9 +269,13 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
     const previewUrl = imagePreviewUrls.current.get(question.id)
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     imagePreviewUrls.current.delete(question.id)
+    const solutionPreview = solutionPreviewUrls.current.get(String(question.id))
+    if (solutionPreview) URL.revokeObjectURL(solutionPreview)
+    solutionPreviewUrls.current.delete(String(question.id))
     setImagePreviews((previews) => {
       const nextPreviews = { ...previews }
       delete nextPreviews[question.id]
+      delete nextPreviews[`${question.id}-solution`]
       return nextPreviews
     })
     onChange(questions.filter((_, questionIndex) => questionIndex !== index))
@@ -155,11 +301,14 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
           <h3>Questions</h3>
           <span className="admin-question-count">{questions.length} {questions.length === 1 ? 'question' : 'questions'}</span>
         </div>
+        <div className="admin-question-toolbar-actions">
+          {renderAddQuestionButton()}
+          {children}
+        </div>
       </div>
       {questions.length === 0 && (
         <div className="admin-question-empty">
           <p className="admin-hint">No questions added yet.</p>
-          {renderAddQuestionButton()}
         </div>
       )}
       <datalist id="admin-question-topic-options">
@@ -176,7 +325,10 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
           return (
           <section className="admin-question-topic-group" key={group.topicKey || 'untitled'}>
             {hasTopicSection && <h4 className="admin-question-topic-heading">{group.topic}</h4>}
-            {group.questions.map(({ question, index }, topicIndex) => (
+            {group.questions.map(({ question, index }, topicIndex) => {
+          const isEditing = question.isDraft || String(question.id) === editingQuestionId
+          const values = question.isDraft || !isEditing ? question : editingQuestion
+          return (
           <fieldset
             className="admin-question-editor"
             key={question.id}
@@ -187,17 +339,48 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
           >
             <div className="admin-question-heading">
               <legend>Question {String(topicIndex + 1).padStart(2, '0')}</legend>
-              <button className="admin-link-button admin-danger-link" type="button" onClick={() => removeQuestion(index)}>
-                Remove Question
-              </button>
+              {question.isDraft ? (
+                <>
+                  <button className="admin-link-button admin-danger-link" type="button" onClick={() => removeQuestion(index)}>
+                    Remove Question
+                  </button>
+                  <button className="admin-button admin-button-secondary" type="button" onClick={() => cancelEditing(question)}>
+                    Cancel
+                  </button>
+                </>
+              ) : isEditing ? (
+                <>
+                  <button className="admin-button admin-button-primary" type="button" onClick={() => saveExistingQuestion(question)} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save Changes'}
+                  </button>
+                  <button className="admin-button admin-button-secondary" type="button" onClick={() => cancelEditing(question)} disabled={saving}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="admin-button admin-button-secondary" type="button" onClick={() => startEditing(questions[index])} disabled={saving || editingQuestionId !== null}>
+                    Edit
+                  </button>
+                  <button className="admin-link-button admin-danger-link" type="button" onClick={() => removeQuestion(index)}>
+                    Remove Question
+                  </button>
+                </>
+              )}
             </div>
+            {isEditing && editErrors.length > 0 && (
+              <ul className="admin-bulk-errors" role="alert">
+                {editErrors.map((message) => <li key={message}>{message}</li>)}
+              </ul>
+            )}
             <label className="admin-field admin-field-wide admin-topic-field">
               Topic
               <input
                 data-question-topic
                 list="admin-question-topic-options"
-                value={questions[index].topic ?? ''}
+                value={values.topic ?? ''}
                 onChange={(event) => updateQuestion(index, 'topic', event.target.value)}
+                disabled={!isEditing}
                 placeholder="e.g. Cell Structure, Chordata, Genetics"
               />
               <span className="admin-hint">Enter the specific Biology topic this question belongs to. Examples: Cell Structure, Cell Division, Chordata, Non-Chordata, Plant Kingdom, Genetics, Molecular Basis of Inheritance.</span>
@@ -206,25 +389,26 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
               Question
               <textarea
                 rows="2"
-                value={question.question}
+                value={values.question}
                 onChange={(event) => updateQuestion(index, 'question', event.target.value)}
+                disabled={!isEditing}
                 required
               />
             </label>
             <div className="admin-field admin-field-wide question-image-field">
               <label htmlFor={`question-image-${question.id}`}>Question Image (Optional)</label>
-              <input
+              {isEditing && <input
                 id={`question-image-${question.id}`}
                 type="file"
                 accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
                 onChange={(event) => handleQuestionImageChange(index, event)}
-              />
+              />}
               <span className="admin-hint">PNG, JPG, or WEBP · up to 10 MB.</span>
               {imageErrors[question.id] && <span className="admin-error" role="alert">{imageErrors[question.id]}</span>}
-              {question.imageRemoved ? (
+              {values.imageRemoved ? (
                 <div className="question-image-preview-actions">
-                  <span className="admin-hint">The attached image will be removed when you publish.</span>
-                  {question.imageUrl && (
+                  <span className="admin-hint">The attached image will be removed when you save changes.</span>
+                  {isEditing && values.imageUrl && (
                     <button
                       className="admin-link-button"
                       type="button"
@@ -234,13 +418,13 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
                     </button>
                   )}
                 </div>
-              ) : (imagePreviews[question.id] || question.imageUrl) && (
+              ) : (imagePreviews[question.id] || values.imageUrl) && (
                 <div className="question-image-preview">
                   <img
-                    src={imagePreviews[question.id] || question.imageUrl}
+                    src={imagePreviews[question.id] || values.imageUrl}
                     alt={`Preview for question ${index + 1}`}
                   />
-                  <button
+                  {isEditing && <button
                     className="admin-link-button admin-danger-link"
                     type="button"
                     onClick={() => {
@@ -252,25 +436,22 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
                         delete nextPreviews[question.id]
                         return nextPreviews
                       })
-                      onChange(questions.map((item, questionIndex) =>
-                        questionIndex === index
-                          ? { ...item, imageFile: null, imageRemoved: true }
-                          : item,
-                      ))
+                      updateQuestionData(index, (item) => ({ ...item, imageFile: null, imageRemoved: true }))
                     }}
                   >
                     Remove image
-                  </button>
+                  </button>}
                 </div>
               )}
             </div>
             <div className="admin-options-grid">
-              {question.options.map((option, optionIndex) => (
+              {values.options.map((option, optionIndex) => (
                 <label className="admin-field" key={optionLabels[optionIndex]}>
                   Option {optionLabels[optionIndex]}
                   <input
                     value={option}
                     onChange={(event) => updateOption(index, optionIndex, event.target.value)}
+                    disabled={!isEditing}
                     required
                   />
                 </label>
@@ -279,12 +460,13 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
             <label className="admin-field admin-field-wide">
               Correct Answer
               <select
-                value={question.correctAnswer ?? question.answer ?? ''}
+                value={values.correctAnswer ?? values.answer ?? ''}
                 onChange={(event) => updateQuestion(index, 'correctAnswer', event.target.value)}
+                disabled={!isEditing}
                 required
               >
                 <option value="">Select the correct option</option>
-                {question.options.map((option, optionIndex) => option && (
+                {values.options.map((option, optionIndex) => option && (
                   <option key={`${question.id}-${optionLabels[optionIndex]}`} value={option}>
                     {optionLabels[optionIndex]} — {option}
                   </option>
@@ -293,46 +475,97 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, saving }) {
             </label>
             <div className="admin-question-meta-fields">
               <label className="admin-field">
-                Question Type
+                Exam Category
                 <select
-                  value={question.questionType || 'NEET PYQ'}
-                  onChange={(event) => updateQuestion(index, 'questionType', event.target.value)}
+                  value={getQuestionExamCategory(values)}
+                  onChange={(event) => updateQuestion(index, 'examCategory', event.target.value)}
+                  disabled={!isEditing}
                 >
-                  <option value="NEET PYQ">NEET PYQ</option>
-                  <option value="Practice">Practice</option>
+                  <option value="">Select exam category</option>
+                  {(examCategories[subject] || examCategories.Biology).map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
                 </select>
               </label>
               <label className="admin-field">
-                NEET Year
+                Exam Year
                 <input
                   type="number"
                   min="1"
                   step="1"
                   inputMode="numeric"
                   placeholder="Optional"
-                  value={question.questionType === 'Practice' ? '' : question.neetYear ?? ''}
-                  disabled={question.questionType === 'Practice'}
-                  onChange={(event) => updateQuestion(index, 'neetYear', event.target.value)}
+                  value={getQuestionExamCategory(values) === 'Practice' ? '' : getQuestionExamYear(values)}
+                  disabled={!isEditing || getQuestionExamCategory(values) === 'Practice'}
+                  onChange={(event) => updateQuestion(index, 'examYear', event.target.value)}
                 />
               </label>
             </div>
-            <span className="admin-hint admin-year-hint">Enter the original examination year only for verified NEET PYQs. Leave blank if unknown or for practice questions.</span>
+            <span className="admin-hint admin-year-hint">Enter the original year only for a verified exam PYQ. Leave blank if unknown or for practice questions.</span>
+            <div className="admin-field admin-field-wide question-image-field">
+              <label htmlFor={`solution-image-${question.id}`}>Solution / Explanation Image (Optional)</label>
+              {isEditing && <input
+                id={`solution-image-${question.id}`}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                onChange={(event) => handleSolutionImageChange(index, event)}
+              />}
+              <span className="admin-hint">Separate from the question diagram · PNG, JPG, or WEBP · up to 10 MB.</span>
+              {imageErrors[`${question.id}-solution`] && <span className="admin-error" role="alert">{imageErrors[`${question.id}-solution`]}</span>}
+              {values.solutionImageRemoved ? (
+                <div className="question-image-preview-actions">
+                  <span className="admin-hint">The solution image will be removed when you save changes.</span>
+                  {isEditing && values.solutionImageUrl && (
+                    <button className="admin-link-button" type="button" onClick={() => updateQuestion(index, 'solutionImageRemoved', false)}>
+                      Keep existing image
+                    </button>
+                  )}
+                </div>
+              ) : (imagePreviews[`${question.id}-solution`] || values.solutionImageUrl) && (
+                <div className="question-image-preview">
+                  <img
+                    src={imagePreviews[`${question.id}-solution`] || values.solutionImageUrl}
+                    alt={`Solution image preview for question ${index + 1}`}
+                  />
+                  {isEditing && <button
+                    className="admin-link-button admin-danger-link"
+                    type="button"
+                    onClick={() => {
+                      const key = String(question.id)
+                      const previewUrl = solutionPreviewUrls.current.get(key)
+                      if (previewUrl) URL.revokeObjectURL(previewUrl)
+                      solutionPreviewUrls.current.delete(key)
+                      setImagePreviews((previews) => {
+                        const nextPreviews = { ...previews }
+                        delete nextPreviews[`${key}-solution`]
+                        return nextPreviews
+                      })
+                      updateQuestionData(index, (item) => ({ ...item, solutionImageFile: null, solutionImageRemoved: true }))
+                    }}
+                  >
+                    Remove solution image
+                  </button>}
+                </div>
+              )}
+            </div>
             <label className="admin-field admin-field-wide admin-explanation-field">
               Explanation
               <textarea
                 rows="4"
-                value={question.explanation}
+                value={values.explanation}
                 onChange={(event) => updateQuestion(index, 'explanation', event.target.value)}
+                disabled={!isEditing}
               />
             </label>
-            <div className="admin-question-actions">
+            {question.isDraft && <div className="admin-question-actions">
               <button className="admin-button admin-button-secondary" type="button" onClick={onSaveQuestion} disabled={saving}>
                 {saving ? 'Saving…' : 'Save/Update Question'}
               </button>
               <span className="admin-hint">Saves by publishing the complete chapter with all current edits.</span>
-            </div>
+            </div>}
           </fieldset>
-            ))}
+          )
+            })}
             {hasTopicSection && groupIndex < topicGroups.length - 1
               && renderAddQuestionButton(group.topic, insertionIndex)}
           </section>

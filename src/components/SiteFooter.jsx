@@ -6,7 +6,7 @@ function SiteFooter() {
       <div className="footer-inner">
         <div className="footer-about">
           <Brand light />
-          <p>Learn Biology. Understand Concepts.</p>
+          <p>Learn Science. Understand Concepts.</p>
         </div>
         <nav className="footer-links" aria-label="Footer navigation">
           <a href="/">Home</a>

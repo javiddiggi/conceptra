@@ -3,7 +3,7 @@ function AdminChapterList({ chapters, hiddenIds, onEdit, onDelete, deletingId })
     <section className="admin-content-card">
       <div className="admin-card-heading">
         <div>
-          <span className="admin-field-eyebrow">BIOLOGY CONTENT</span>
+          <span className="admin-field-eyebrow">CHAPTER CONTENT</span>
           <h2>Manage Chapters</h2>
           <p>Review existing NCERT chapters and manage published content.</p>
         </div>
@@ -15,6 +15,7 @@ function AdminChapterList({ chapters, hiddenIds, onEdit, onDelete, deletingId })
             <thead>
               <tr>
                 <th>Class</th>
+                <th>Subject</th>
                 <th>Chapter</th>
                 <th>YouTube</th>
                 <th>Notes</th>
@@ -28,6 +29,7 @@ function AdminChapterList({ chapters, hiddenIds, onEdit, onDelete, deletingId })
                 return (
                   <tr key={chapter.id}>
                     <td>Class {chapter.class}</td>
+                    <td>{chapter.subject || 'Biology'}</td>
                     <td>
                       <div className="admin-table-chapter">
                         <strong>{chapter.chapterNumber}. {chapter.title}</strong>

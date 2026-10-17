@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react'
-import { saveChapter } from '../../lib/adminContent.js'
+import { appendChapterQuestions, saveChapter, saveExistingChapterQuestion } from '../../lib/adminContent.js'
 import {
-  assignMissingQuestionTopics,
   inheritQuestionTopicsAtPosition,
 } from '../../lib/questionTopics.js'
 import QuestionEditor from './QuestionEditor.jsx'
+import { getQuestionExamYear } from '../../lib/questionFiltering.js'
+import BulkQuestionImport from './BulkQuestionImport.jsx'
+import { validateNotesUrl } from '../../lib/notesLinks.js'
 
 const maxNotesPdfSize = 50 * 1024 * 1024
 
@@ -20,6 +22,7 @@ function slugify(value) {
 function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCancel }) {
   const formRef = useRef(null)
   const [classNumber, setClassNumber] = useState(chapter?.class || 11)
+  const [subject, setSubject] = useState(chapter?.subject || 'Biology')
   const [chapterNumber, setChapterNumber] = useState(() => chapter?.chapterNumber || chapters
     .filter((item) => item.class === 11)
     .reduce((highest, item) => Math.max(highest, item.chapterNumber), 0) + 1)
@@ -28,7 +31,8 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
   const [youtubeUrl, setYoutubeUrl] = useState(chapter?.youtubeUrl || '')
   const [notesPdf, setNotesPdf] = useState(chapter?.notesPdf || '')
   const [notesFile, setNotesFile] = useState(null)
-  const [questions, setQuestions] = useState(() => assignMissingQuestionTopics(chapter?.questions || []))
+  const [questions, setQuestions] = useState(() => chapter?.questions || [])
+  const [savedQuestions, setSavedQuestions] = useState(() => chapter?.questions || [])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -53,6 +57,13 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    let validatedNotesUrl
+    try {
+      validatedNotesUrl = validateNotesUrl(notesPdf || '')
+    } catch (notesError) {
+      setError(notesError.message)
+      return
+    }
     if (youtubeUrl) {
       let videoUrl
       try {
@@ -72,7 +83,11 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
       setError('The chapter name must contain letters or numbers.')
       return
     }
-    if (!chapter && chapters.some((item) => item.id === slug && item.class === Number(classNumber))) {
+    if (!chapter && chapters.some((item) =>
+      item.class === Number(classNumber)
+      && item.subject === subject
+      && (item.id === slug || slugify(item.title) === slug),
+    )) {
       setError('A chapter with this name already exists. Edit the existing chapter instead.')
       return
     }
@@ -87,20 +102,21 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
       return
     }
 
-    const sameSlugInOtherClass = !chapter
-      && chapters.some((item) => item.id === slug && item.class !== Number(classNumber))
-    const id = chapter?.id || (sameSlugInOtherClass ? `class-${classNumber}-${slug}` : slug)
+    const slugInOtherClass = !chapter && chapters.some((item) => item.id === slug)
+    const id = chapter?.id || (subject === 'Biology' && !slugInOtherClass
+      ? slug
+      : `${subject.toLowerCase()}-${classNumber}-${slug}`)
     setSaving(true)
     try {
       await saveChapter({
         id,
         class: Number(classNumber),
-        subject: 'Biology',
+        subject,
         chapterNumber: Number(chapterNumber),
         title,
         description,
         youtubeUrl,
-        notesPdf,
+        notesPdf: validatedNotesUrl,
         questions: inheritQuestionTopicsAtPosition(questions).map((question) => {
           const questionData = { ...question }
           const answer = questionData.answer
@@ -110,14 +126,20 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
           return {
             ...questionData,
             correctAnswer: question.correctAnswer ?? answer,
-            questionType: question.questionType || 'NEET PYQ',
-            neetYear: question.questionType === 'Practice' ? '' : question.neetYear || '',
+            ...(question.questionType ? { questionType: question.questionType } : {}),
+            examYear: question.examCategory === 'Practice' || question.questionType === 'Practice'
+              ? ''
+              : getQuestionExamYear(question),
           }
         }),
       }, notesFile, {
         isNew: !chapter || typeof chapter.isPublished === 'undefined',
+        includeQuestions: !chapter
+          || typeof chapter.isPublished === 'undefined'
+          || JSON.stringify(questions) !== JSON.stringify(savedQuestions),
         onIdentityStatus,
-        previousQuestions: chapter?.questions || [],
+        expectedQuestions: savedQuestions,
+        previousQuestions: savedQuestions,
       })
       await onSaved()
     } catch (saveError) {
@@ -129,6 +151,53 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
 
   function saveQuestion() {
     formRef.current?.requestSubmit()
+  }
+
+  async function importQuestions(importedQuestions) {
+    if (!chapter || typeof chapter.isPublished === 'undefined') {
+      const nextQuestions = [...questions, ...importedQuestions]
+      setQuestions(nextQuestions)
+      setSavedQuestions(nextQuestions)
+      return
+    }
+    if (JSON.stringify(questions) !== JSON.stringify(savedQuestions)) {
+      throw new Error('Save or discard your current question edits before importing, so they are not confused with newer saved questions.')
+    }
+    const latestQuestions = await appendChapterQuestions(chapter.id, importedQuestions)
+    setQuestions(latestQuestions)
+    setSavedQuestions(latestQuestions)
+  }
+
+  async function saveExistingQuestion(questionId, editedQuestion) {
+    if (!chapter || typeof chapter.isPublished === 'undefined') {
+      throw new Error('Only a saved chapter question can be edited this way.')
+    }
+    const baselineQuestion = savedQuestions.find((question) => String(question.id) === String(questionId))
+    if (!baselineQuestion) {
+      throw new Error('This question is not part of the latest saved chapter state. Reload the chapter and try again.')
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const result = await saveExistingChapterQuestion(
+        chapter.id,
+        baselineQuestion,
+        editedQuestion,
+        onIdentityStatus,
+      )
+      const latestQuestions = result.questions
+      setSavedQuestions(latestQuestions)
+      setQuestions((current) => [
+        ...latestQuestions,
+        ...current.filter((question) => question.isDraft),
+      ])
+      setError(result.warning)
+    } catch (saveError) {
+      setError(saveError.message || 'Question changes could not be saved.')
+      throw saveError
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -152,7 +221,7 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
               setClassNumber(nextClass)
               if (!chapter) {
                 const lastNumber = chapters
-                  .filter((item) => item.class === nextClass)
+                  .filter((item) => item.class === nextClass && item.subject === subject)
                   .reduce((highest, item) => Math.max(highest, item.chapterNumber), 0)
                 setChapterNumber(lastNumber + 1)
               }
@@ -164,7 +233,21 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
         </label>
         <label className="admin-field">
           Subject
-          <input value="Biology" readOnly />
+          <select value={subject} disabled={Boolean(chapter)} onChange={(event) => {
+            const nextSubject = event.target.value
+            setSubject(nextSubject)
+            if (!chapter) {
+              const lastNumber = chapters
+                .filter((item) => item.class === Number(classNumber) && item.subject === nextSubject)
+                .reduce((highest, item) => Math.max(highest, item.chapterNumber), 0)
+              setChapterNumber(lastNumber + 1)
+            }
+          }}>
+            <option>Biology</option>
+            <option>Physics</option>
+            <option>Chemistry</option>
+          </select>
+          {chapter && <span className="admin-hint">Existing chapter subjects stay fixed to preserve their student URL.</span>}
         </label>
         <label className="admin-field">
           Chapter Number
@@ -183,20 +266,36 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
           <input type="url" placeholder="https://www.youtube.com/watch?v=..." value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} />
         </label>
         <label className="admin-field admin-field-wide">
-          Notes PDF
+          Notes PDF or Google Drive share link
+          <input
+            type="text"
+            placeholder="https://drive.google.com/file/d/..."
+            value={notesPdf || ''}
+            onChange={(event) => setNotesPdf(event.target.value)}
+          />
+          <span className="admin-hint">For Drive, share as “Anyone with the link” · Viewer. Supabase-hosted PDFs continue to work.</span>
           <input type="file" accept="application/pdf,.pdf" onChange={handlePdfChange} />
           <span className="admin-hint">
-            {notesFile ? `${notesFile.name} · ready to upload` : notesPdf ? 'A PDF is currently attached. Choose another PDF to replace it.' : 'Optional PDF upload, up to 50 MB.'}
+            {notesFile ? `${notesFile.name} · ready to upload` : 'Optional PDF upload, up to 50 MB.'}
           </span>
-          {notesPdf && !notesFile && (
-            <button className="admin-link-button admin-danger-link" type="button" onClick={() => setNotesPdf('')}>
-              Remove attached PDF
-            </button>
-          )}
         </label>
       </div>
 
-      <QuestionEditor questions={questions} onChange={setQuestions} onSaveQuestion={saveQuestion} saving={saving} />
+      <QuestionEditor
+        questions={questions}
+        onChange={setQuestions}
+        onSaveQuestion={saveQuestion}
+        onSaveExistingQuestion={saveExistingQuestion}
+        saving={saving}
+        subject={subject}
+      >
+        <BulkQuestionImport
+          onImport={importQuestions}
+          disabled={saving}
+          currentQuestionCount={questions.length}
+          subject={subject}
+        />
+      </QuestionEditor>
       {error && <p className="admin-error" role="alert">{error}</p>}
       <div className="admin-form-actions">
         <button className="admin-button admin-button-primary" type="submit" disabled={saving}>

@@ -6,6 +6,39 @@
   z-index: 5;
 }
 
+.question-exam-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.question-exam-filter select {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--text-dark);
+  font: inherit;
+}
+
+.solution-image {
+  margin-top: 14px;
+}
+
+.solution-image img {
+  display: block;
+  width: min(100%, 560px);
+  max-height: 520px;
+  object-fit: contain;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #fff;
+}
+
 .header-inner,
 .footer-inner {
   width: min(1140px, calc(100% - 64px));
@@ -675,6 +708,17 @@
 }
 
 @media (max-width: 640px) {
+  .question-exam-filter {
+    width: 100%;
+    justify-content: space-between;
+    margin-right: 0;
+  }
+
+  .question-exam-filter select {
+    flex: 1;
+    min-width: 0;
+  }
+
   .home-hero {
     width: min(calc(100% - 24px), 1400px);
     min-height: auto;
@@ -1016,9 +1060,10 @@
 }
 
 .curriculum-note {
-  margin: 21px 0 0;
-  color: #8d978b;
-  font-size: 10px;
+  margin: 28px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .chapter-page-heading {
@@ -3134,7 +3179,7 @@
 }
 
 .class-listing-container .curriculum-note {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 @media (max-width: 900px) {
@@ -3843,4 +3888,8 @@
     :root[data-theme="dark"] .main-nav a {
       border-bottom-color: var(--border-color);
     }
+  }
+
+  :root[data-theme="dark"] .question-subgroup-heading {
+    color: #a9d8b3;
   }

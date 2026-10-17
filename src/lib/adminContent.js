@@ -1,4 +1,7 @@
 import { supabase } from './supabase.js'
+import { serializeQuestionImages } from './questionSerialization.js'
+import { replaceExistingQuestion } from './questionEdits.js'
+import { getOwnedQuestionImageStoragePath } from './storageImagePath.js'
 
 const chaptersTable = 'biology_chapters'
 const hiddenChaptersTable = 'hidden_biology_chapters'
@@ -41,7 +44,7 @@ export function toStudentChapter(row) {
   return {
     id: row.id,
     class: row.class_number,
-    subject: row.subject,
+    subject: row.subject || 'Biology',
     chapterNumber: row.chapter_number,
     title: row.title,
     description: row.description || '',
@@ -83,15 +86,8 @@ export async function getHiddenChapterIds() {
   return data.map((row) => row.id)
 }
 
-function getQuestionImageStoragePath(imageUrl) {
-  if (typeof imageUrl !== 'string' || !imageUrl) return null
-  try {
-    const segments = new URL(imageUrl).pathname.split('/').filter(Boolean).map(decodeURIComponent)
-    const bucketIndex = segments.lastIndexOf(questionImagesBucket)
-    return bucketIndex === -1 ? null : segments.slice(bucketIndex + 1).join('/')
-  } catch {
-    return imageUrl.replace(/^\/+/, '').replace(new RegExp(`^${questionImagesBucket}/`), '') || null
-  }
+function getQuestionImageStoragePath(imageUrl, client) {
+  return getOwnedQuestionImageStoragePath(imageUrl, client.supabaseUrl)
 }
 
 async function removeUploadedFiles(client, bucket, paths, label) {
@@ -102,8 +98,10 @@ async function removeUploadedFiles(client, bucket, paths, label) {
 
 export async function saveChapter(chapter, notesFile, {
   isNew,
+  includeQuestions = true,
   onIdentityStatus,
   previousQuestions = [],
+  expectedQuestions = previousQuestions,
 } = {}) {
   const client = requireSupabase()
   const identityStatus = await getAdminIdentityStatus()
@@ -122,7 +120,7 @@ export async function saveChapter(chapter, notesFile, {
 
   if (notesFile) {
     const safeName = notesFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
-    notesUploadedPath = `class-${chapter.class}/biology/${chapter.id}/${Date.now()}-${safeName}`
+    notesUploadedPath = `class-${chapter.class}/${chapter.subject.toLowerCase()}/${chapter.id}/${Date.now()}-${safeName}`
     const { error: uploadError } = await client.storage
       .from(notesBucket)
       .upload(notesUploadedPath, notesFile, { contentType: 'application/pdf', upsert: true })
@@ -133,35 +131,56 @@ export async function saveChapter(chapter, notesFile, {
 
   let questions
   try {
-    questions = []
-    for (const [index, question] of chapter.questions.entries()) {
-      const { imageFile, imageRemoved, imageUrl: existingImageUrl, ...questionData } = question
-      let imageUrl = imageRemoved ? null : existingImageUrl || null
+    if (includeQuestions) {
+      questions = []
+      for (const [index, question] of chapter.questions.entries()) {
+        const {
+          imageFile,
+          imageRemoved,
+          imageUrl: existingImageUrl,
+          solutionImageFile,
+          solutionImageRemoved,
+          solutionImageUrl: existingSolutionImageUrl,
+        } = question
+        let imageUrl = imageRemoved ? null : existingImageUrl || null
+        let solutionImageUrl = solutionImageRemoved ? null : existingSolutionImageUrl || null
 
-      if (imageFile) {
-        const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
-        const safeQuestionId = String(question.id ?? index + 1).replace(/[^a-zA-Z0-9_-]/g, '-')
-        const imagePath = `${chapter.id}/${safeQuestionId}/${Date.now()}-${index}-${safeName}`
-        const { error: uploadError } = await client.storage
-          .from(questionImagesBucket)
-          .upload(imagePath, imageFile, { contentType: imageFile.type, upsert: false })
-        if (uploadError) throw new Error(`Question ${index + 1} image upload failed: ${uploadError.message}`)
-        questionImageUploads.push(imagePath)
-        imageUrl = client.storage.from(questionImagesBucket).getPublicUrl(imagePath).data.publicUrl
-      }
+        for (const [file, kind] of [[imageFile, 'question'], [solutionImageFile, 'solution']]) {
+          if (!file) continue
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-')
+          const safeQuestionId = String(question.id ?? index + 1).replace(/[^a-zA-Z0-9_-]/g, '-')
+          const imagePath = `${chapter.id}/${safeQuestionId}/${kind}-${Date.now()}-${index}-${safeName}`
+          const { error: uploadError } = await client.storage
+            .from(questionImagesBucket)
+            .upload(imagePath, file, { contentType: file.type, upsert: false })
+          if (uploadError) throw new Error(`Question ${index + 1} ${kind} image upload failed: ${uploadError.message}`)
+          questionImageUploads.push(imagePath)
+          const uploadedUrl = client.storage.from(questionImagesBucket).getPublicUrl(imagePath).data.publicUrl
+          if (kind === 'question') imageUrl = uploadedUrl
+          else solutionImageUrl = uploadedUrl
+        }
 
-      if ((imageFile || imageRemoved) && existingImageUrl) {
-        const oldImagePath = getQuestionImageStoragePath(existingImageUrl)
-        if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+        if ((imageFile || imageRemoved) && existingImageUrl) {
+          const oldImagePath = getQuestionImageStoragePath(existingImageUrl, client)
+          if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+        }
+        if ((solutionImageFile || solutionImageRemoved) && existingSolutionImageUrl) {
+          const oldImagePath = getQuestionImageStoragePath(existingSolutionImageUrl, client)
+          if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+        }
+        questions.push(serializeQuestionImages(question, imageUrl, solutionImageUrl))
       }
-      questions.push({ ...questionData, ...(imageUrl ? { imageUrl } : {}) })
+      const retainedImageUrls = new Set(questions.flatMap((question) =>
+        [question.imageUrl, question.solutionImageUrl].filter(Boolean),
+      ))
+      previousQuestions.forEach((question) => {
+        for (const imageUrl of [question.imageUrl, question.solutionImageUrl]) {
+          if (!imageUrl || retainedImageUrls.has(imageUrl)) continue
+          const oldImagePath = getQuestionImageStoragePath(imageUrl, client)
+          if (oldImagePath) questionImagesToRemove.add(oldImagePath)
+        }
+      })
     }
-    const retainedImageUrls = new Set(questions.map((question) => question.imageUrl).filter(Boolean))
-    previousQuestions.forEach((question) => {
-      if (!question.imageUrl || retainedImageUrls.has(question.imageUrl)) return
-      const oldImagePath = getQuestionImageStoragePath(question.imageUrl)
-      if (oldImagePath) questionImagesToRemove.add(oldImagePath)
-    })
   } catch (error) {
     const cleanupErrors = []
     try {
@@ -180,20 +199,46 @@ export async function saveChapter(chapter, notesFile, {
   const row = {
     id: chapter.id,
     class_number: chapter.class,
-    subject: 'Biology',
+    subject: chapter.subject,
     chapter_number: chapter.chapterNumber,
     title: chapter.title.trim(),
     description: chapter.description.trim(),
     youtube_url: chapter.youtubeUrl.trim(),
     notes_pdf: notesPdf,
-    questions,
+    ...(includeQuestions ? { questions } : {}),
     is_published: true,
   }
-  const saveQuery = isNew
-    ? client.from(chaptersTable).insert(row)
-    : client.from(chaptersTable).update(row).eq('id', chapter.id)
-  const { error: saveError } = await saveQuery
+  let savedChapter
+  let saveError
+  if (isNew) {
+    const result = await client.from(chaptersTable).insert(row)
+    savedChapter = result.error ? null : { id: chapter.id }
+    saveError = result.error
+  } else {
+    let saveQuery = client.from(chaptersTable).update(row).eq('id', chapter.id)
+    if (includeQuestions) {
+      saveQuery = saveQuery.eq('questions', JSON.stringify(expectedQuestions))
+    }
+    const result = await saveQuery.select('id').maybeSingle()
+    savedChapter = result.data
+    saveError = result.error
+  }
   if (saveError) {
+    const cleanupErrors = []
+    try {
+      await removeUploadedFiles(client, questionImagesBucket, questionImageUploads, 'Question image')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
+    }
+
+    try {
+      await removeUploadedFiles(client, notesBucket, notesUploadedPath ? [notesUploadedPath] : [], 'Notes PDF')
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError.message)
+    }
+    throw new Error(`Chapter row save failed: ${saveError.message}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
+  }
+  if (!savedChapter) {
     const cleanupErrors = []
     try {
       await removeUploadedFiles(client, questionImagesBucket, questionImageUploads, 'Question image')
@@ -205,7 +250,7 @@ export async function saveChapter(chapter, notesFile, {
     } catch (cleanupError) {
       cleanupErrors.push(cleanupError.message)
     }
-    throw new Error(`Chapter row save failed: ${saveError.message}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
+    throw new Error(`Chapter questions changed while saving. Reload the latest chapter before publishing.${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
   }
 
   const { error: restoreError } = await client.from(hiddenChaptersTable).delete().eq('id', chapter.id)
@@ -215,6 +260,130 @@ export async function saveChapter(chapter, notesFile, {
     await removeUploadedFiles(client, questionImagesBucket, [...questionImagesToRemove], 'Old question image')
   } catch (error) {
     throw new Error(`Chapter saved, but ${error.message}`, { cause: error })
+  }
+}
+
+export async function appendChapterQuestions(chapterId, questions) {
+  const client = requireSupabase()
+  const identityStatus = await getAdminIdentityStatus()
+  if (!identityStatus.sessionExists || !identityStatus.userId || !identityStatus.isAdmin) {
+    throw new Error('Administrator access is required to import questions.')
+  }
+  const { data, error } = await client.rpc('append_chapter_questions', {
+    target_chapter_id: chapterId,
+    new_questions: questions,
+  })
+  if (error) throw new Error(`Question import failed: ${error.message}`)
+  if (!Array.isArray(data)) throw new Error('Question import returned an invalid saved question list.')
+  return data
+}
+
+export async function saveExistingChapterQuestion(chapterId, baselineQuestion, editedQuestion, onIdentityStatus) {
+  const client = requireSupabase()
+  const identityStatus = await getAdminIdentityStatus()
+  onIdentityStatus?.(identityStatus)
+  if (!identityStatus.sessionExists || !identityStatus.userId || !identityStatus.isAdmin) {
+    throw new Error('Administrator access is required to save question changes.')
+  }
+
+  const { data: chapterRow, error: loadError } = await client
+    .from(chaptersTable)
+    .select('questions')
+    .eq('id', chapterId)
+    .single()
+  if (loadError) throw new Error(`Could not load the latest saved questions: ${loadError.message}`)
+  const latestQuestions = Array.isArray(chapterRow.questions) ? chapterRow.questions : []
+  const mergedQuestions = replaceExistingQuestion(
+    latestQuestions,
+    baselineQuestion.id,
+    baselineQuestion,
+    editedQuestion,
+  )
+  const questionIndex = mergedQuestions.findIndex((question) => String(question.id) === String(baselineQuestion.id))
+  const question = mergedQuestions[questionIndex]
+  const {
+    imageFile,
+    imageRemoved,
+    imageUrl: oldImageUrl,
+    solutionImageFile,
+    solutionImageRemoved,
+    solutionImageUrl: oldSolutionImageUrl,
+  } = question
+  let imageUrl = imageRemoved ? null : oldImageUrl || null
+  let solutionImageUrl = solutionImageRemoved ? null : oldSolutionImageUrl || null
+  const uploadedPaths = []
+  const pathsToRemove = new Set()
+  let questionChangesSaved = false
+
+  try {
+    for (const [file, kind] of [[imageFile, 'question'], [solutionImageFile, 'solution']]) {
+      if (!file) continue
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-')
+      const safeQuestionId = String(question.id).replace(/[^a-zA-Z0-9_-]/g, '-')
+      const imagePath = `${chapterId}/${safeQuestionId}/${kind}-${Date.now()}-${safeName}`
+      const { error: uploadError } = await client.storage
+        .from(questionImagesBucket)
+        .upload(imagePath, file, { contentType: file.type, upsert: false })
+      if (uploadError) throw new Error(`Question ${kind} image upload failed: ${uploadError.message}`)
+      uploadedPaths.push(imagePath)
+      const uploadedUrl = client.storage.from(questionImagesBucket).getPublicUrl(imagePath).data.publicUrl
+      if (kind === 'question') imageUrl = uploadedUrl
+      else solutionImageUrl = uploadedUrl
+    }
+
+    if ((imageFile || imageRemoved) && oldImageUrl) {
+      const oldPath = getQuestionImageStoragePath(oldImageUrl, client)
+      if (oldPath) pathsToRemove.add(oldPath)
+    }
+    if ((solutionImageFile || solutionImageRemoved) && oldSolutionImageUrl) {
+      const oldPath = getQuestionImageStoragePath(oldSolutionImageUrl, client)
+      if (oldPath) pathsToRemove.add(oldPath)
+    }
+    mergedQuestions[questionIndex] = serializeQuestionImages(question, imageUrl, solutionImageUrl)
+
+    const retainedUrls = new Set(mergedQuestions.flatMap((item) =>
+      [item.imageUrl, item.solutionImageUrl].filter(Boolean),
+    ))
+    for (const existingQuestion of latestQuestions) {
+      for (const existingUrl of [existingQuestion.imageUrl, existingQuestion.solutionImageUrl]) {
+        if (!existingUrl || retainedUrls.has(existingUrl)) continue
+        const oldPath = getQuestionImageStoragePath(existingUrl, client)
+        if (oldPath) pathsToRemove.add(oldPath)
+      }
+    }
+
+    const { data: savedRow, error: saveError } = await client
+      .from(chaptersTable)
+      .update({ questions: mergedQuestions })
+      .eq('id', chapterId)
+      .eq('questions', JSON.stringify(latestQuestions))
+      .select('questions')
+      .maybeSingle()
+    if (saveError) throw new Error(`Question changes could not be saved: ${saveError.message}`)
+    if (!savedRow) {
+      throw new Error('The chapter questions changed while this edit was saving. Your changes were not applied; reopen the question and try again.')
+    }
+    questionChangesSaved = true
+    let warning = ''
+    try {
+      await removeUploadedFiles(client, questionImagesBucket, [...pathsToRemove], 'Old question image')
+    } catch (cleanupError) {
+      warning = `Question saved, but ${cleanupError.message}`
+    }
+    return { questions: savedRow.questions, warning }
+  } catch (error) {
+    const cleanupErrors = []
+    if (!questionChangesSaved) {
+      try {
+        await removeUploadedFiles(client, questionImagesBucket, uploadedPaths, 'New question image')
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError.message)
+      }
+    }
+    if (cleanupErrors.length) {
+      throw new Error(`${error.message} ${cleanupErrors.join(' ')}`, { cause: error })
+    }
+    throw error
   }
 }
 

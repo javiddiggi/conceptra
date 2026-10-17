@@ -559,6 +559,121 @@
   margin: 3px 0 0;
 }
 
+.admin-question-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-content-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.admin-content-filters .admin-field {
+  min-width: 160px;
+}
+
+.admin-bulk-import {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--light-mint);
+}
+
+.admin-bulk-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-bulk-heading h4,
+.admin-bulk-heading p {
+  margin: 0;
+}
+
+.admin-bulk-heading h4 {
+  font-size: 17px;
+}
+
+.admin-bulk-heading p,
+.admin-bulk-heading > span,
+.admin-bulk-format p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.admin-bulk-format pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--white);
+  font: 12px/1.5 ui-monospace, Consolas, monospace;
+}
+
+.admin-bulk-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-bulk-question {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--white);
+}
+
+.admin-bulk-question legend {
+  padding: 0 6px;
+  color: var(--dark-green);
+  font-weight: 750;
+}
+
+.admin-bulk-errors {
+  margin: 0;
+  padding-left: 22px;
+  color: #a12622;
+  font-size: 13px;
+}
+
+.admin-bulk-year-warning {
+  padding: 10px 12px;
+  border-left: 3px solid var(--gold);
+  background: rgba(212, 167, 44, 0.12);
+  font-size: 13px;
+}
+
+.admin-bulk-confirm-year {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.admin-bulk-confirm-year input {
+  flex: 0 0 auto;
+  margin-top: 5px;
+}
+
+.question-subgroup-heading {
+  margin: 8px 0 0;
+  color: var(--dark-green);
+  font-size: 14px;
+}
+
 .admin-question-count {
   display: inline-block;
   color: var(--text-muted);
@@ -706,6 +821,17 @@
     gap: 10px;
   }
 
+  .admin-question-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .admin-question-toolbar-actions .admin-button {
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
   .admin-question-toolbar > .admin-button {
     min-height: 38px;
     padding: 0 10px;
@@ -728,5 +854,21 @@
 
   .admin-login-card {
     padding: 26px 21px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-content-filters,
+  .admin-content-filters .admin-field {
+    width: 100%;
+  }
+
+
+  .admin-bulk-import {
+    padding: 12px;
+  }
+
+  .admin-bulk-question {
+    padding: 12px 9px;
   }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { biologyChapters } from '../../data/biologyData.js'
+import { chapterCatalog } from '../../data/biologyData.js'
 import { getAdminChapters, getAdminIdentityStatus, getHiddenChapterIds, hideChapter } from '../../lib/adminContent.js'
 import { isSupabaseConfigured, supabase } from '../../lib/supabase.js'
 import AdminChapterForm from './AdminChapterForm.jsx'
@@ -7,18 +7,20 @@ import AdminChapterList from './AdminChapterList.jsx'
 import { Brand } from '../SiteHeader.jsx'
 
 function combineChapters(storedChapters) {
-  const chapterMap = new Map(biologyChapters.map((chapter) => [chapter.id, chapter]))
+  const chapterMap = new Map(chapterCatalog.map((chapter) => [chapter.id, chapter]))
   storedChapters.forEach((chapter) => {
     chapterMap.set(chapter.id, chapter)
   })
   return [...chapterMap.values()].sort((left, right) =>
-    left.class - right.class || left.chapterNumber - right.chapterNumber,
+    left.class - right.class
+      || (left.subject || 'Biology').localeCompare(right.subject || 'Biology')
+      || left.chapterNumber - right.chapterNumber,
   )
 }
 
 function AdminDashboard() {
   const [access, setAccess] = useState('checking')
-  const [chapters, setChapters] = useState(biologyChapters)
+  const [chapters, setChapters] = useState(chapterCatalog)
   const [hiddenIds, setHiddenIds] = useState([])
   const [activeView, setActiveView] = useState('manage')
   const [editingChapter, setEditingChapter] = useState(null)
@@ -26,6 +28,8 @@ function AdminDashboard() {
   const [deletingId, setDeletingId] = useState('')
   const [notice, setNotice] = useState('')
   const [identityStatus, setIdentityStatus] = useState(null)
+  const [classFilter, setClassFilter] = useState('all')
+  const [subjectFilter, setSubjectFilter] = useState('all')
 
   const refreshChapters = useCallback(async () => {
     const [storedChapters, hiddenChapterIds] = await Promise.all([
@@ -141,7 +145,7 @@ function AdminDashboard() {
         <section className="admin-page-heading">
           <span className="admin-field-eyebrow">CONTENT MANAGEMENT</span>
           <h1>Conceptra Admin</h1>
-          <p>Manage Class 11 and Class 12 Biology chapters, notes, videos and NEET PYQs.</p>
+          <p>Manage Class 11 and Class 12 Biology, Physics and Chemistry chapters, notes, videos and NEET questions.</p>
         </section>
         {identityStatus && <IdentityDiagnostic status={identityStatus} />}
         <nav className="admin-tabs" aria-label="Admin sections">
@@ -150,6 +154,27 @@ function AdminDashboard() {
         </nav>
         {loadError && <div className="admin-error-banner" role="alert">{loadError}</div>}
         {notice && <div className="admin-success-banner" role="status">{notice}</div>}
+        {!editingChapter && activeView === 'manage' && (
+          <div className="admin-content-filters">
+            <label className="admin-field">
+              Class
+              <select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}>
+                <option value="all">All classes</option>
+                <option value="11">Class 11</option>
+                <option value="12">Class 12</option>
+              </select>
+            </label>
+            <label className="admin-field">
+              Subject
+              <select value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}>
+                <option value="all">All subjects</option>
+                <option value="Biology">Biology</option>
+                <option value="Physics">Physics</option>
+                <option value="Chemistry">Chemistry</option>
+              </select>
+            </label>
+          </div>
+        )}
         {editingChapter || activeView === 'add' ? (
           <AdminChapterForm
             chapter={editingChapter}
@@ -160,7 +185,10 @@ function AdminDashboard() {
           />
         ) : (
           <AdminChapterList
-            chapters={chapters}
+            chapters={chapters.filter((chapter) =>
+              (classFilter === 'all' || chapter.class === Number(classFilter))
+              && (subjectFilter === 'all' || chapter.subject === subjectFilter),
+            )}
             hiddenIds={hiddenIds}
             deletingId={deletingId}
             onEdit={(chapter) => setEditingChapter(chapter)}
