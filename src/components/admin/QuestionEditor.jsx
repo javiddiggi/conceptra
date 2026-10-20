@@ -16,7 +16,19 @@ function orderQuestionsByTopic(questions) {
     .flatMap((group) => group.questions.map(({ index }) => questions[index]))
 }
 
-function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQuestion, saving, subject = 'Biology' }) {
+function QuestionEditor({
+  questions,
+  onChange,
+  onSaveQuestion,
+  onSaveExistingQuestion,
+  saving,
+  subject = 'Biology',
+  pasteOpen,
+  onTogglePaste,
+  topicFormOpen,
+  onToggleTopicForm,
+  children,
+}) {
   const questionRefs = useRef(new Map())
   const imagePreviewUrls = useRef(new Map())
   const [pendingFocusId, setPendingFocusId] = useState(null)
@@ -303,8 +315,27 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQue
         </div>
         <div className="admin-question-toolbar-actions">
           {renderAddQuestionButton()}
+          <button
+            className="admin-button admin-button-secondary"
+            type="button"
+            onClick={onTogglePaste}
+            disabled={saving}
+            aria-expanded={pasteOpen}
+          >
+            Paste One Question
+          </button>
+          <button
+            className="admin-button admin-button-secondary"
+            type="button"
+            onClick={onToggleTopicForm}
+            disabled={saving}
+            aria-expanded={topicFormOpen}
+          >
+            + Add New Topic Questions
+          </button>
         </div>
       </div>
+      {children}
       {questions.length === 0 && (
         <div className="admin-question-empty">
           <p className="admin-hint">No questions added yet.</p>

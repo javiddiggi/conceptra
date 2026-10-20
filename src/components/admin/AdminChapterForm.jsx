@@ -36,6 +36,11 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
   const [savedQuestions, setSavedQuestions] = useState(() => chapter?.questions || [])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [topicFormOpen, setTopicFormOpen] = useState(false)
+  const [newTopicName, setNewTopicName] = useState('')
+  const [topicFormError, setTopicFormError] = useState('')
+  const [activePasteTopic, setActivePasteTopic] = useState('')
 
   function handlePdfChange(event) {
     const file = event.target.files?.[0] || null
@@ -170,6 +175,26 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
     }
   }
 
+  function handleNewTopicSubmit(event) {
+    event.preventDefault()
+    const topicName = newTopicName.trim()
+    if (!topicName) {
+      setTopicFormError('Enter a topic name before continuing.')
+      return
+    }
+    setActivePasteTopic(topicName)
+    setNewTopicName('')
+    setTopicFormError('')
+    setTopicFormOpen(false)
+    setPasteOpen(true)
+  }
+
+  function cancelNewTopic() {
+    setNewTopicName('')
+    setTopicFormError('')
+    setTopicFormOpen(false)
+  }
+
   async function saveExistingQuestion(questionId, editedQuestion) {
     if (!chapter || typeof chapter.isPublished === 'undefined') {
       throw new Error('Only a saved chapter question can be edited this way.')
@@ -290,13 +315,52 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
         onSaveExistingQuestion={saveExistingQuestion}
         saving={saving}
         subject={subject}
-      />
-      <SingleQuestionPaste
-        onSave={savePastedQuestion}
-        disabled={saving}
-        currentQuestionCount={questions.length}
-        subject={subject}
-      />
+        pasteOpen={pasteOpen}
+        onTogglePaste={() => setPasteOpen((open) => !open)}
+        topicFormOpen={topicFormOpen}
+        onToggleTopicForm={() => {
+          setTopicFormError('')
+          setTopicFormOpen((open) => !open)
+        }}
+      >
+        {topicFormOpen && (
+          <form className="admin-new-topic-form" onSubmit={handleNewTopicSubmit}>
+            <div>
+              <h4>Add New Topic Questions</h4>
+              <p>Choose a topic for questions added to this chapter. Nothing is saved until you save a question.</p>
+            </div>
+            <label className="admin-field">
+              Topic name
+              <input
+                autoFocus
+                value={newTopicName}
+                onChange={(event) => {
+                  setNewTopicName(event.target.value)
+                  setTopicFormError('')
+                }}
+                placeholder="e.g. Bryophytes"
+                maxLength="100"
+                required
+              />
+            </label>
+            {topicFormError && <p className="admin-error" role="alert">{topicFormError}</p>}
+            <div className="admin-single-paste-actions">
+              <button className="admin-button admin-button-primary" type="submit">Use This Topic</button>
+              <button className="admin-button admin-button-secondary" type="button" onClick={cancelNewTopic}>Cancel</button>
+            </div>
+          </form>
+        )}
+        <div className="admin-single-paste-container" hidden={!pasteOpen}>
+          <SingleQuestionPaste
+            onSave={savePastedQuestion}
+            onClose={() => setPasteOpen(false)}
+            selectedTopic={activePasteTopic}
+            disabled={saving}
+            currentQuestionCount={questions.length}
+            subject={subject}
+          />
+        </div>
+      </QuestionEditor>
       {error && <p className="admin-error" role="alert">{error}</p>}
       <div className="admin-form-actions">
         <button className="admin-button admin-button-primary" type="submit" disabled={saving}>

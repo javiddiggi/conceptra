@@ -30,7 +30,7 @@ const previewFields = [
   ['Solution Image URL', 'solutionImageUrl'],
 ]
 
-function SingleQuestionPaste({ onSave, disabled, currentQuestionCount, subject = 'Biology' }) {
+function SingleQuestionPaste({ onSave, onClose, selectedTopic = '', disabled, currentQuestionCount, subject = 'Biology' }) {
   const [sourceText, setSourceText] = useState('')
   const [preview, setPreview] = useState(null)
   const [parseErrors, setParseErrors] = useState([])
@@ -38,6 +38,7 @@ function SingleQuestionPaste({ onSave, disabled, currentQuestionCount, subject =
   const [successMessage, setSuccessMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const questionPreview = preview && selectedTopic ? { ...preview, topic: selectedTopic } : preview
 
   function parse() {
     const result = parseSingleQuestion(sourceText, subject)
@@ -63,9 +64,9 @@ function SingleQuestionPaste({ onSave, disabled, currentQuestionCount, subject =
     setSuccessMessage('')
     try {
       const result = await onSave({
-        ...preview,
+        ...questionPreview,
         id: `bulk-${crypto.randomUUID()}`,
-        ...(preview.examCategory === 'Practice' ? { examYear: '' } : {}),
+        ...(questionPreview.examCategory === 'Practice' ? { examYear: '' } : {}),
       })
       setSourceText('')
       setPreview(null)
@@ -87,8 +88,14 @@ function SingleQuestionPaste({ onSave, disabled, currentQuestionCount, subject =
         <div>
           <h4>Paste One Question</h4>
           <p>Paste one complete question. We’ll identify its fields and show a preview before saving.</p>
+          {selectedTopic && <p className="admin-single-paste-topic">Adding questions under <strong>{selectedTopic}</strong>.</p>}
         </div>
-        <span>{currentQuestionCount} currently in chapter</span>
+        <div className="admin-single-paste-heading-actions">
+          <span>{currentQuestionCount} currently in chapter</span>
+          <button className="admin-button admin-button-secondary" type="button" onClick={onClose} disabled={saving}>
+            Close
+          </button>
+        </div>
       </div>
       <details className="admin-single-paste-format">
         <summary>View suggested format</summary>
@@ -127,8 +134,8 @@ function SingleQuestionPaste({ onSave, disabled, currentQuestionCount, subject =
           <dl>
             {previewFields.map(([label, key]) => {
               const value = key.startsWith('option')
-                ? preview.options[key.charCodeAt(key.length - 1) - 65]
-                : preview[key]
+                ? questionPreview.options[key.charCodeAt(key.length - 1) - 65]
+                : questionPreview[key]
               return (
                 <div className="admin-single-paste-preview-row" key={key}>
                   <dt>{label}</dt>
