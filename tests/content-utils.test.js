@@ -18,7 +18,13 @@ import {
 import { serializeQuestionImages } from '../src/lib/questionSerialization.js'
 import { replaceExistingQuestion, validateQuestionEdit } from '../src/lib/questionEdits.js'
 import { getOwnedQuestionImageStoragePath } from '../src/lib/storageImagePath.js'
-import { groupQuestionsByTopic } from '../src/lib/questionTopics.js'
+import {
+  applyQuestionTopicDefault,
+  createQuestionDraft,
+  getDefaultQuestionTopic,
+  groupQuestionsByTopic,
+  updateQuestionTopic,
+} from '../src/lib/questionTopics.js'
 import AnswerFeedback from '../src/components/AnswerFeedback.js'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -87,7 +93,16 @@ test('reports missing required question details and unsupported multiple answers
 })
 
 test('appends one pasted question without replacing existing saved questions', async () => {
-  const existingQuestions = [{ id: 1, question: 'Existing', options: ['A', 'B', 'C', 'D'] }]
+  const existingQuestions = [{
+    id: 1,
+    question: 'Existing',
+    options: ['A', 'B', 'C', 'D'],
+    correctAnswer: 'A',
+    topic: 'Existing topic',
+    explanation: 'Keep this explanation.',
+    imageUrl: 'https://example.com/question.png',
+    solutionImageUrl: 'https://example.com/solution.png',
+  }]
   const newQuestion = { id: 'bulk-new', question: 'Added' }
   let requestedQuestions
   const result = await appendPastedQuestion({
@@ -104,7 +119,16 @@ test('appends one pasted question without replacing existing saved questions', a
 
   assert.deepEqual(requestedQuestions, [newQuestion])
   assert.deepEqual(result, [...existingQuestions, newQuestion])
-  assert.deepEqual(existingQuestions, [{ id: 1, question: 'Existing', options: ['A', 'B', 'C', 'D'] }])
+  assert.deepEqual(existingQuestions, [{
+    id: 1,
+    question: 'Existing',
+    options: ['A', 'B', 'C', 'D'],
+    correctAnswer: 'A',
+    topic: 'Existing topic',
+    explanation: 'Keep this explanation.',
+    imageUrl: 'https://example.com/question.png',
+    solutionImageUrl: 'https://example.com/solution.png',
+  }])
 })
 
 test('adds one pasted question to the existing local question list for an unpublished chapter', async () => {
@@ -120,6 +144,67 @@ test('adds one pasted question to the existing local question list for an unpubl
 
   assert.deepEqual(result, [...existingQuestions, newQuestion])
   assert.equal(existingQuestions.length, 1)
+})
+
+test('edits each question topic independently and preserves other question data', () => {
+  const first = {
+    id: 1,
+    topic: 'Mechanics',
+    question: 'First?',
+    options: ['A', 'B', 'C', 'D'],
+    correctAnswer: 'A',
+  }
+  const second = {
+    id: 2,
+    topic: 'Mechanics',
+    question: 'Second?',
+    options: ['E', 'F', 'G', 'H'],
+    correctAnswer: 'F',
+  }
+
+  const updated = updateQuestionTopic([first, second], first.id, '3.1 Algae')
+
+  assert.equal(updated[0].topic, '3.1 Algae')
+  assert.equal(updated[1].topic, 'Mechanics')
+  assert.equal(updated[0].question, first.question)
+  assert.deepEqual(updated[0].options, first.options)
+  assert.deepEqual([first, second], [
+    { ...first, topic: 'Mechanics' },
+    { ...second, topic: 'Mechanics' },
+  ])
+})
+
+test('initializes a new question with the current topic as its editable default', () => {
+  const existing = [
+    { id: 1, topic: 'Plant Kingdom', question: 'Existing?' },
+    { id: 2, topic: '3.1 Algae', question: 'Latest?' },
+  ]
+
+  assert.equal(getDefaultQuestionTopic(existing), '3.1 Algae')
+  assert.deepEqual(createQuestionDraft(3, getDefaultQuestionTopic(existing)), {
+    id: 3,
+    question: '',
+    options: ['', '', '', ''],
+    correctAnswer: '',
+    explanation: '',
+    questionType: 'NEET PYQ',
+    examCategory: 'NEET',
+    topic: '3.1 Algae',
+    examYear: '',
+    isDraft: true,
+    defaultTopic: '3.1 Algae',
+  })
+})
+
+test('uses the default topic only when a pasted question has no explicit topic', () => {
+  assert.equal(
+    applyQuestionTopicDefault({ topic: '3.1 Algae', question: 'Explicit' }, 'Plant Kingdom').topic,
+    '3.1 Algae',
+  )
+  assert.equal(
+    applyQuestionTopicDefault({ topic: '', question: 'No topic' }, 'Plant Kingdom').topic,
+    'Plant Kingdom',
+  )
 })
 
 test('propagates question-save errors and rejects appends when chapter edits are unsaved', async () => {

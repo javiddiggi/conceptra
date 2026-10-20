@@ -34,6 +34,39 @@ export function inheritQuestionTopicsAtPosition(questions) {
   })
 }
 
+export function getDefaultQuestionTopic(questions) {
+  const topics = assignMissingQuestionTopics(questions)
+  return topics[topics.length - 1]?.topic || 'General'
+}
+
+export function createQuestionDraft(id, topic) {
+  const defaultTopic = topic?.trim() || 'General'
+  return {
+    id,
+    question: '',
+    options: ['', '', '', ''],
+    correctAnswer: '',
+    explanation: '',
+    questionType: 'NEET PYQ',
+    examCategory: 'NEET',
+    topic: defaultTopic,
+    examYear: '',
+    isDraft: true,
+    defaultTopic,
+  }
+}
+
+export function updateQuestionTopic(questions, questionId, topic) {
+  return questions.map((question) => String(question.id) === String(questionId)
+    ? { ...question, topic }
+    : question)
+}
+
+export function applyQuestionTopicDefault(question, defaultTopic) {
+  if (question.topic?.trim()) return question
+  return { ...question, topic: defaultTopic?.trim() || 'General' }
+}
+
 export function groupQuestionsByTopic(questions) {
   const groups = []
   const groupsByTopic = new Map()

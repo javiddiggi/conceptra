@@ -575,36 +575,11 @@
   margin-top: 16px;
 }
 
-.admin-new-topic-form {
-  display: grid;
-  gap: 12px;
-  margin: 12px 0;
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--light-mint);
-}
-
-.admin-new-topic-form h4,
-.admin-new-topic-form p {
-  margin: 0;
-}
-
-.admin-new-topic-form h4 {
-  color: var(--text-dark);
-  font-size: 16px;
-}
-
-.admin-new-topic-form > div:first-child p,
 .admin-single-paste-heading-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.admin-single-paste-topic {
-  margin-top: 5px !important;
 }
 
 .admin-single-paste-heading-actions > span {

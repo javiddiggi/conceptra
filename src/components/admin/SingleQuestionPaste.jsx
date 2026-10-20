@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { parseSingleQuestion } from '../../lib/singleQuestionParser.js'
+import { applyQuestionTopicDefault } from '../../lib/questionTopics.js'
 
 const example = `Exam Category: NEET
 Exam Year: 2024
@@ -38,7 +39,7 @@ function SingleQuestionPaste({ onSave, onClose, selectedTopic = '', disabled, cu
   const [successMessage, setSuccessMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
-  const questionPreview = preview && selectedTopic ? { ...preview, topic: selectedTopic } : preview
+  const questionPreview = preview ? applyQuestionTopicDefault(preview, selectedTopic) : preview
 
   function parse() {
     const result = parseSingleQuestion(sourceText, subject)

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   assignMissingQuestionTopics,
+  createQuestionDraft,
   flattenQuestionGroups,
   groupQuestionsByTopic,
+  updateQuestionTopic,
 } from '../../lib/questionTopics.js'
 import { examCategories, getQuestionExamCategory, getQuestionExamYear } from '../../lib/questionFiltering.js'
 import { validateQuestionEdit } from '../../lib/questionEdits.js'
@@ -25,8 +27,8 @@ function QuestionEditor({
   subject = 'Biology',
   pasteOpen,
   onTogglePaste,
-  topicFormOpen,
-  onToggleTopicForm,
+  defaultTopic,
+  onDefaultTopicChange,
   children,
 }) {
   const questionRefs = useRef(new Map())
@@ -34,6 +36,7 @@ function QuestionEditor({
   const [pendingFocusId, setPendingFocusId] = useState(null)
   const [imageErrors, setImageErrors] = useState({})
   const [imagePreviews, setImagePreviews] = useState({})
+  const [topicInputValues, setTopicInputValues] = useState({})
   const solutionPreviewUrls = useRef(new Map())
   const [editingQuestionId, setEditingQuestionId] = useState(null)
   const [editingQuestion, setEditingQuestion] = useState(null)
@@ -75,17 +78,17 @@ function QuestionEditor({
     })
     if (isEditingSavedQuestion) {
       setEditingQuestion((question) => update(question))
+      if (field === 'topic') onDefaultTopicChange(value.trim())
       setEditErrors([])
       return
     }
     if (!target.isDraft) return
-    const updatedQuestions = questions.map((question, questionIndex) =>
-      questionIndex === index ? update(question) : question,
-    )
-    if (field === 'topic' && value.trim()) {
-      onChange(orderQuestionsByTopic(updatedQuestions))
-      return
-    }
+    const updatedQuestions = field === 'topic'
+      ? updateQuestionTopic(questions, target.id, value)
+      : questions.map((question, questionIndex) =>
+        questionIndex === index ? update(question) : question,
+      )
+    if (field === 'topic') onDefaultTopicChange(value.trim())
     onChange(updatedQuestions)
   }
 
@@ -126,6 +129,11 @@ function QuestionEditor({
 
   function cancelEditing(question) {
     if (!question.isDraft) {
+      setTopicInputValues((values) => {
+        const nextValues = { ...values }
+        delete nextValues[question.id]
+        return nextValues
+      })
       clearEditingPreviews(question.id)
       setEditingQuestionId(null)
       setEditingQuestion(null)
@@ -258,19 +266,10 @@ function QuestionEditor({
 
     const orderedQuestions = orderQuestionsByTopic(questions)
     const precedingTopic = orderedQuestions[insertionIndex - 1]?.topic?.trim()
-    const newQuestion = {
+    const newQuestion = createQuestionDraft(
       id,
-      question: '',
-      options: ['', '', '', ''],
-      correctAnswer: '',
-      explanation: '',
-      questionType: 'NEET PYQ',
-      examCategory: 'NEET',
-      topic: '',
-      examYear: '',
-      isDraft: true,
-      defaultTopic: precedingTopic || topicAbove || 'General',
-    }
+      topicAbove || defaultTopic || precedingTopic,
+    )
     orderedQuestions.splice(insertionIndex, 0, newQuestion)
     onChange(orderedQuestions)
     setPendingFocusId(id)
@@ -278,6 +277,11 @@ function QuestionEditor({
 
   function removeQuestion(index) {
     const question = questions[index]
+    setTopicInputValues((values) => {
+      const nextValues = { ...values }
+      delete nextValues[question.id]
+      return nextValues
+    })
     const previewUrl = imagePreviewUrls.current.get(question.id)
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     imagePreviewUrls.current.delete(question.id)
@@ -313,9 +317,7 @@ function QuestionEditor({
           <h3>Questions</h3>
           <span className="admin-question-count">{questions.length} {questions.length === 1 ? 'question' : 'questions'}</span>
         </div>
-        <div className="admin-question-toolbar-actions">
-          {renderAddQuestionButton()}
-        </div>
+        {renderAddQuestionButton()}
       </div>
       {questions.length === 0 && (
         <div className="admin-question-empty">
@@ -389,8 +391,19 @@ function QuestionEditor({
               <input
                 data-question-topic
                 list="admin-question-topic-options"
-                value={values.topic ?? ''}
-                onChange={(event) => updateQuestion(index, 'topic', event.target.value)}
+                value={topicInputValues[question.id] ?? values.topic ?? ''}
+                onChange={(event) => {
+                  setTopicInputValues((current) => ({ ...current, [question.id]: event.target.value }))
+                  onDefaultTopicChange(event.target.value.trim())
+                }}
+                onBlur={(event) => {
+                  updateQuestion(index, 'topic', event.target.value)
+                  setTopicInputValues((current) => {
+                    const nextValues = { ...current }
+                    delete nextValues[question.id]
+                    return nextValues
+                  })
+                }}
                 disabled={!isEditing}
                 placeholder="e.g. Cell Structure, Chordata, Genetics"
               />
@@ -597,15 +610,6 @@ function QuestionEditor({
           aria-expanded={pasteOpen}
         >
           Paste One Question
-        </button>
-        <button
-          className="admin-button admin-button-secondary"
-          type="button"
-          onClick={onToggleTopicForm}
-          disabled={saving}
-          aria-expanded={topicFormOpen}
-        >
-          + Add New Topic Questions
         </button>
       </div>
     </section>
