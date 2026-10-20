@@ -567,6 +567,14 @@
   gap: 8px;
 }
 
+.admin-question-bottom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .admin-new-topic-form {
   display: grid;
   gap: 12px;

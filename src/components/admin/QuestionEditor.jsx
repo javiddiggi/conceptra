@@ -315,27 +315,8 @@ function QuestionEditor({
         </div>
         <div className="admin-question-toolbar-actions">
           {renderAddQuestionButton()}
-          <button
-            className="admin-button admin-button-secondary"
-            type="button"
-            onClick={onTogglePaste}
-            disabled={saving}
-            aria-expanded={pasteOpen}
-          >
-            Paste One Question
-          </button>
-          <button
-            className="admin-button admin-button-secondary"
-            type="button"
-            onClick={onToggleTopicForm}
-            disabled={saving}
-            aria-expanded={topicFormOpen}
-          >
-            + Add New Topic Questions
-          </button>
         </div>
       </div>
-      {children}
       {questions.length === 0 && (
         <div className="admin-question-empty">
           <p className="admin-hint">No questions added yet.</p>
@@ -606,6 +587,27 @@ function QuestionEditor({
         topicGroups[topicGroups.length - 1]?.topic || '',
         flattenQuestionGroups(topicGroups).length,
       )}
+      {children}
+      <div className="admin-question-bottom-actions">
+        <button
+          className="admin-button admin-button-secondary"
+          type="button"
+          onClick={onTogglePaste}
+          disabled={saving}
+          aria-expanded={pasteOpen}
+        >
+          Paste One Question
+        </button>
+        <button
+          className="admin-button admin-button-secondary"
+          type="button"
+          onClick={onToggleTopicForm}
+          disabled={saving}
+          aria-expanded={topicFormOpen}
+        >
+          + Add New Topic Questions
+        </button>
+      </div>
     </section>
   )
 }
