@@ -273,8 +273,8 @@ export async function appendChapterQuestions(chapterId, questions) {
     target_chapter_id: chapterId,
     new_questions: questions,
   })
-  if (error) throw new Error(`Question import failed: ${error.message}`)
-  if (!Array.isArray(data)) throw new Error('Question import returned an invalid saved question list.')
+  if (error) throw new Error(`Question save failed: ${error.message}`)
+  if (!Array.isArray(data)) throw new Error('Question save returned an invalid saved question list.')
   return data
 }
 

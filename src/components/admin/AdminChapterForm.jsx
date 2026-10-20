@@ -5,7 +5,8 @@ import {
 } from '../../lib/questionTopics.js'
 import QuestionEditor from './QuestionEditor.jsx'
 import { getQuestionExamYear } from '../../lib/questionFiltering.js'
-import BulkQuestionImport from './BulkQuestionImport.jsx'
+import SingleQuestionPaste from './SingleQuestionPaste.jsx'
+import { appendPastedQuestion } from '../../lib/singleQuestionParser.js'
 import { validateNotesUrl } from '../../lib/notesLinks.js'
 
 const maxNotesPdfSize = 50 * 1024 * 1024
@@ -153,19 +154,20 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
     formRef.current?.requestSubmit()
   }
 
-  async function importQuestions(importedQuestions) {
-    if (!chapter || typeof chapter.isPublished === 'undefined') {
-      const nextQuestions = [...questions, ...importedQuestions]
-      setQuestions(nextQuestions)
-      setSavedQuestions(nextQuestions)
-      return
-    }
-    if (JSON.stringify(questions) !== JSON.stringify(savedQuestions)) {
-      throw new Error('Save or discard your current question edits before importing, so they are not confused with newer saved questions.')
-    }
-    const latestQuestions = await appendChapterQuestions(chapter.id, importedQuestions)
+  async function savePastedQuestion(question) {
+    const latestQuestions = await appendPastedQuestion({
+      chapter,
+      questions,
+      savedQuestions,
+      question,
+      appendQuestions: appendChapterQuestions,
+    })
     setQuestions(latestQuestions)
     setSavedQuestions(latestQuestions)
+    return {
+      questions: latestQuestions,
+      persisted: Boolean(chapter && typeof chapter.isPublished !== 'undefined'),
+    }
   }
 
   async function saveExistingQuestion(questionId, editedQuestion) {
@@ -288,14 +290,13 @@ function AdminChapterForm({ chapter, chapters, onSaved, onIdentityStatus, onCanc
         onSaveExistingQuestion={saveExistingQuestion}
         saving={saving}
         subject={subject}
-      >
-        <BulkQuestionImport
-          onImport={importQuestions}
-          disabled={saving}
-          currentQuestionCount={questions.length}
-          subject={subject}
-        />
-      </QuestionEditor>
+      />
+      <SingleQuestionPaste
+        onSave={savePastedQuestion}
+        disabled={saving}
+        currentQuestionCount={questions.length}
+        subject={subject}
+      />
       {error && <p className="admin-error" role="alert">{error}</p>}
       <div className="admin-form-actions">
         <button className="admin-button admin-button-primary" type="submit" disabled={saving}>

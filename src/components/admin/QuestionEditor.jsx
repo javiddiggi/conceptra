@@ -16,7 +16,7 @@ function orderQuestionsByTopic(questions) {
     .flatMap((group) => group.questions.map(({ index }) => questions[index]))
 }
 
-function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQuestion, saving, children, subject = 'Biology' }) {
+function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQuestion, saving, subject = 'Biology' }) {
   const questionRefs = useRef(new Map())
   const imagePreviewUrls = useRef(new Map())
   const [pendingFocusId, setPendingFocusId] = useState(null)
@@ -303,7 +303,6 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQue
         </div>
         <div className="admin-question-toolbar-actions">
           {renderAddQuestionButton()}
-          {children}
         </div>
       </div>
       {questions.length === 0 && (
@@ -369,7 +368,7 @@ function QuestionEditor({ questions, onChange, onSaveQuestion, onSaveExistingQue
               )}
             </div>
             {isEditing && editErrors.length > 0 && (
-              <ul className="admin-bulk-errors" role="alert">
+              <ul className="admin-validation-errors" role="alert">
                 {editErrors.map((message) => <li key={message}>{message}</li>)}
               </ul>
             )}

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseBulkQuestions, validateBulkQuestions } from '../src/lib/bulkQuestionParser.js'
+import { appendPastedQuestion, parseSingleQuestion } from '../src/lib/singleQuestionParser.js'
 import {
   filterQuestionsByExam,
   filterQuestionsByMode,
@@ -23,78 +23,123 @@ import AnswerFeedback from '../src/components/AnswerFeedback.js'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-function questionBlock(number, { type = 'NEET PYQ', year = '2022', topic = 'Mechanics' } = {}) {
-  return `Question ${number}: What is force ${number}?\nA) One\nB) Two\nC) Three\nD) Four\nAnswer: B\nExplanation: Force is explained here.\nType: ${type}\nTopic: ${topic}\nYear: ${type === 'Practice' ? '' : year}`
-}
+const pasteExample = `Exam Category: NEET
+Exam Year: 2024
+Topic: Bryophytes
+Question: The correct sequence of events in the life cycle of bryophytes is
+A. Option A
+B. Option B
+C. Option C
+D. Option D
+Correct Answer: B
+Explanation: Brief explanation here
+Image URL: https://example.com/question.png
+Solution Image URL: https://example.com/solution.png`
 
-test('parses a batch of 30 labeled questions with answer letters and practice values', () => {
-  const input = Array.from({ length: 30 }, (_, index) =>
-    questionBlock(index + 1, index === 29 ? { type: 'Practice', year: '' } : {}),
-  ).join('\n\n')
-  const { questions, errors } = parseBulkQuestions(input)
+test('parses one labeled question with metadata, all options, answer, and image URLs', () => {
+  const { question, errors } = parseSingleQuestion(pasteExample)
 
   assert.deepEqual(errors, [])
-  assert.equal(questions.length, 30)
-  assert.equal(questions[0].correctAnswer, 'Two')
-  assert.equal(questions[0].options.length, 4)
-  assert.equal(questions[29].questionType, 'Practice')
-  assert.equal(questions[29].examYear, '')
-  assert.deepEqual(validateBulkQuestions(questions).map(({ errors: issues }) => issues), Array(30).fill([]))
+  assert.deepEqual(question, {
+    question: 'The correct sequence of events in the life cycle of bryophytes is',
+    options: ['Option A', 'Option B', 'Option C', 'Option D'],
+    correctAnswer: 'Option B',
+    explanation: 'Brief explanation here',
+    questionType: 'NEET PYQ',
+    examCategory: 'NEET',
+    examYear: '2024',
+    topic: 'Bryophytes',
+    imageUrl: 'https://example.com/question.png',
+    solutionImageUrl: 'https://example.com/solution.png',
+  })
 })
 
-test('reports malformed blocks and validation errors instead of inventing values', () => {
-  const { questions, errors } = parseBulkQuestions('Unlabeled text\n\nQuestion: Incomplete?\nA) One')
-  assert.equal(errors.length, 1)
-  assert.equal(questions.length, 1)
-  assert.ok(validateBulkQuestions(questions)[0].errors.length > 0)
+test('leaves omitted optional metadata empty and supports existing Type and Answer labels', () => {
+  const { question, errors } = parseSingleQuestion(
+    'Question 1: What is force?\nA) One\nB) Two\nC) Three\nD) Four\nAnswer: B\nType: NEET PYQ',
+    'Physics',
+  )
+
+  assert.deepEqual(errors, [])
+  assert.equal(question.correctAnswer, 'Two')
+  assert.equal(question.examCategory, 'NEET')
+  assert.equal(question.examYear, '')
+  assert.equal(question.topic, '')
+  assert.equal(question.explanation, '')
+  assert.equal(question.imageUrl, '')
+  assert.equal(question.solutionImageUrl, '')
 })
 
-test('flags conflicting repeated answers and prevents importing until reviewed', () => {
-  const input = questionBlock(1).replace('Answer: B', 'Answer: B\nCorrect Answer: C')
-  const { questions } = parseBulkQuestions(input)
-  const errors = validateBulkQuestions(questions)[0].errors
-
-  assert.equal(questions[0].correctAnswer, 'Two')
-  assert.ok(errors.some((error) => error.includes('Question 1: Answer is repeated with conflicting values')))
-  assert.ok(errors.some((error) => error.includes('“B” and “C”')))
+test('rejects pasted text containing more than one question', () => {
+  const { errors } = parseSingleQuestion(`${pasteExample}\n\nQuestion 2: Another one?\nA. A\nB. B\nC. C\nD. D\nCorrect Answer: A`)
+  assert.ok(errors.some((error) => error.includes('Paste exactly one question')))
 })
 
-test('flags conflicting repeated exam categories', () => {
-  const input = questionBlock(1)
-    .replace('Type: NEET PYQ', 'Exam Category: NEET\nExam Type: JEE Main')
-  const { questions } = parseBulkQuestions(input)
+test('reports missing required question details and unsupported multiple answers', () => {
+  const missing = parseSingleQuestion('Question: Incomplete?\nA. One')
+  assert.ok(missing.errors.some((error) => error.includes('All four options')))
+  assert.ok(missing.errors.some((error) => error.includes('Correct Answer')))
 
-  assert.ok(validateBulkQuestions(questions, 'Physics')[0].errors
-    .some((error) => error.includes('Question 1: Exam Category is repeated with conflicting values')))
+  const multiple = parseSingleQuestion(
+    'Question: Choose?\nA. One\nB. Two\nC. Three\nD. Four\nCorrect Answer: A and C',
+  )
+  assert.ok(multiple.errors.some((error) => error.includes('multiple correct answers')))
 })
 
-test('flags conflicting repeated exam years', () => {
-  const input = questionBlock(1).replace('Year: 2022', 'Exam Year: 2022\nNEET Year: 2023')
-  const { questions } = parseBulkQuestions(input)
+test('appends one pasted question without replacing existing saved questions', async () => {
+  const existingQuestions = [{ id: 1, question: 'Existing', options: ['A', 'B', 'C', 'D'] }]
+  const newQuestion = { id: 'bulk-new', question: 'Added' }
+  let requestedQuestions
+  const result = await appendPastedQuestion({
+    chapter: { id: 'chapter-id', isPublished: true },
+    questions: existingQuestions,
+    savedQuestions: existingQuestions,
+    question: newQuestion,
+    appendQuestions: async (chapterId, questions) => {
+      assert.equal(chapterId, 'chapter-id')
+      requestedQuestions = questions
+      return [...existingQuestions, ...questions]
+    },
+  })
 
-  assert.ok(validateBulkQuestions(questions)[0].errors
-    .some((error) => error.includes('Question 1: Exam Year is repeated with conflicting values')))
+  assert.deepEqual(requestedQuestions, [newQuestion])
+  assert.deepEqual(result, [...existingQuestions, newQuestion])
+  assert.deepEqual(existingQuestions, [{ id: 1, question: 'Existing', options: ['A', 'B', 'C', 'D'] }])
 })
 
-test('flags conflicting repeated topics', () => {
-  const input = questionBlock(1).replace('Topic: Mechanics', 'Topic: Mechanics\nTopic: Kinematics')
-  const { questions } = parseBulkQuestions(input)
+test('adds one pasted question to the existing local question list for an unpublished chapter', async () => {
+  const existingQuestions = [{ id: 1, question: 'Existing' }]
+  const newQuestion = { id: 'bulk-new', question: 'Added' }
+  const result = await appendPastedQuestion({
+    chapter: null,
+    questions: existingQuestions,
+    savedQuestions: existingQuestions,
+    question: newQuestion,
+    appendQuestions: async () => assert.fail('An unpublished chapter should not call the saved-question RPC'),
+  })
 
-  assert.ok(validateBulkQuestions(questions)[0].errors
-    .some((error) => error.includes('Question 1: Topic is repeated with conflicting values')))
+  assert.deepEqual(result, [...existingQuestions, newQuestion])
+  assert.equal(existingQuestions.length, 1)
 })
 
-test('allows a valid single-value question and flags repeated identical values for review', () => {
-  const { questions: validQuestions } = parseBulkQuestions(questionBlock(1))
-  assert.deepEqual(validateBulkQuestions(validQuestions)[0].errors, [])
+test('propagates question-save errors and rejects appends when chapter edits are unsaved', async () => {
+  const existingQuestions = [{ id: 1, question: 'Existing' }]
+  const saveFailure = new Error('Question save failed: network unavailable')
+  await assert.rejects(appendPastedQuestion({
+    chapter: { id: 'chapter-id', isPublished: true },
+    questions: existingQuestions,
+    savedQuestions: existingQuestions,
+    question: { id: 'bulk-new' },
+    appendQuestions: async () => { throw saveFailure },
+  }), (error) => error === saveFailure)
 
-  const repeatedInput = questionBlock(1).replace('Topic: Mechanics', 'Topic: Mechanics\nTopic: Mechanics')
-  const { questions: repeatedQuestions } = parseBulkQuestions(repeatedInput)
-  assert.ok(validateBulkQuestions(repeatedQuestions)[0].errors
-    .some((error) => error.includes('Topic is repeated with the same value')))
-  assert.deepEqual(validateBulkQuestions(
-    repeatedQuestions.map((question) => ({ ...question, parseErrors: [] })),
-  )[0].errors, [])
+  await assert.rejects(appendPastedQuestion({
+    chapter: { id: 'chapter-id', isPublished: true },
+    questions: [...existingQuestions, { id: 2, question: 'Unsaved' }],
+    savedQuestions: existingQuestions,
+    question: { id: 'bulk-new' },
+    appendQuestions: async () => assert.fail('Must not append over unsaved changes'),
+  }), /Save or discard your current question edits/)
 })
 
 test('only extracts cleanup paths from this project’s exact public question-images URLs', () => {
@@ -277,17 +322,23 @@ test('supports exam filtering without classifying legacy Biology questions as JE
 })
 
 test('parses explicit JEE categories and a separate solution image URL', () => {
-  const input = `${questionBlock(1, { year: '2021' })
-    .replace('Type: NEET PYQ', 'Exam Type: JEE Advanced')
-    .replace('Year: 2021', 'Exam Year: 2021')}\nSolution Image URL: https://example.com/solution.png`
-  const { questions, errors } = parseBulkQuestions(input)
+  const input = `Exam Type: JEE Advanced
+Exam Year: 2021
+Question 1: What is force?
+A) One
+B) Two
+C) Three
+D) Four
+Answer: B
+Solution Image URL: https://example.com/solution.png`
+  const { question, errors } = parseSingleQuestion(input, 'Physics')
   assert.deepEqual(errors, [])
-  assert.equal(questions[0].examCategory, 'JEE Advanced')
-  assert.equal(questions[0].questionType, 'JEE Advanced PYQ')
-  assert.equal(questions[0].examYear, '2021')
-  assert.equal(questions[0].solutionImageUrl, 'https://example.com/solution.png')
-  assert.deepEqual(validateBulkQuestions(questions, 'Physics')[0].errors, [])
-  assert.ok(validateBulkQuestions(questions, 'Biology')[0].errors.some((error) => error.includes('exam category')))
+  assert.equal(question.examCategory, 'JEE Advanced')
+  assert.equal(question.questionType, 'JEE Advanced PYQ')
+  assert.equal(question.examYear, '2021')
+  assert.equal(question.correctAnswer, 'Two')
+  assert.equal(question.solutionImageUrl, 'https://example.com/solution.png')
+  assert.ok(parseSingleQuestion(input, 'Biology').errors.some((error) => error.includes('exam category')))
 })
 
 test('preserves question and solution image URLs and all other fields when serializing', () => {

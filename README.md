@@ -42,28 +42,28 @@ The chapter page embeds valid YouTube links and also provides a link to watch on
 
 ### Add questions
 
-The existing question shape is retained. In Admin, use **Bulk Paste Questions** to paste question blocks, inspect and edit the preview, correct validation errors, verify each PYQ year, and append the accepted batch. Use this labeled format, with a blank line between question blocks:
+The existing question shape is retained. In Admin, use **Paste One Question** to paste a complete question and inspect its preview before saving. Use this labeled format:
 
 ```text
-Question: Which quantity is conserved in an isolated system?
-A) Momentum
-B) Temperature
-C) Pressure
-D) Density
-Answer: A
-Explanation: With no external force, total momentum remains constant.
 Exam Category: NEET
-Topic: Laws of Motion
 Exam Year: 2020
-Image URL: https://example.com/diagram.png
-Solution Image URL: https://example.com/solution.png
+Topic: Bryophytes
+Question: The correct sequence of events in the life cycle of bryophytes is
+A. Option A
+B. Option B
+C. Option C
+D. Option D
+Correct Answer: B
+Explanation: Brief explanation here
+Image URL:
+Solution Image URL:
 ```
 
-`Exam Category` supports NEET, JEE Main, JEE Advanced, and Practice in Physics/Chemistry; Biology supports NEET and Practice. Older `Type: NEET PYQ` and `Type: Practice` labels remain accepted. `Exam Year`, `Image URL`, and `Solution Image URL` are separate fields; a year is required for a non-practice batch item and must be confirmed in preview. The parser cannot establish whether a year is historically correct. Existing question objects are not deduplicated or rewritten by sorting. Student-facing ordering is display-only: dated PYQs are newest-first within each topic, same-year order is retained, and practice questions appear separately.
+Question and options A–D plus one correct answer are required. Exam category, year, topic, explanation, and image URLs are recognized when present; omitted optional fields remain blank. `Exam Category` supports NEET, JEE Main, JEE Advanced, and Practice in Physics/Chemistry; Biology supports NEET and Practice. Older `Type: NEET PYQ` and `Type: Practice` labels remain accepted. The question schema stores one correct answer per question. Existing question objects are not deduplicated or rewritten by sorting. Student-facing ordering is display-only: dated PYQs are newest-first within each topic, same-year order is retained, and practice questions appear separately.
 
 The single-question Admin editor supports separate question and solution image uploads to the existing `question-images` bucket. Solution images display alongside the explanation after answer submission.
 
-Saved questions, including bulk-imported questions, have an **Edit** action with per-question Save Changes and Cancel controls. Edits preserve the question ID and unrelated fields, and update the topic grouping after saving. Existing question arrays are loaded fresh and checked again during save so concurrent changes are rejected instead of silently overwriting other questions. For an existing chapter, batch import still uses a database append operation against the latest saved question array; metadata-only chapter saves do not send the `questions` field.
+Saved questions have an **Edit** action with per-question Save Changes and Cancel controls. Edits preserve the question ID and unrelated fields, and update the topic grouping after saving. Existing question arrays are loaded fresh and checked again during save so concurrent changes are rejected instead of silently overwriting other questions. Pasting a question into an existing chapter uses the database append operation against the latest saved question array; metadata-only chapter saves do not send the `questions` field.
 
 ```js
 questions: [
