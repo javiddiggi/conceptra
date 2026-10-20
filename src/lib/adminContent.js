@@ -2,6 +2,7 @@ import { supabase } from './supabase.js'
 import { serializeQuestionImages } from './questionSerialization.js'
 import { replaceExistingQuestion } from './questionEdits.js'
 import { getOwnedQuestionImageStoragePath } from './storageImagePath.js'
+import { formatSupabaseSaveError, saveChapterRow } from './chapterRowSave.js'
 
 const chaptersTable = 'biology_chapters'
 const hiddenChaptersTable = 'hidden_biology_chapters'
@@ -208,21 +209,18 @@ export async function saveChapter(chapter, notesFile, {
     ...(includeQuestions ? { questions } : {}),
     is_published: true,
   }
-  let savedChapter
-  let saveError
-  if (isNew) {
-    const result = await client.from(chaptersTable).insert(row)
-    savedChapter = result.error ? null : { id: chapter.id }
-    saveError = result.error
-  } else {
-    let saveQuery = client.from(chaptersTable).update(row).eq('id', chapter.id)
-    if (includeQuestions) {
-      saveQuery = saveQuery.eq('questions', JSON.stringify(expectedQuestions))
-    }
-    const result = await saveQuery.select('id').maybeSingle()
-    savedChapter = result.data
-    saveError = result.error
-  }
+  const result = await saveChapterRow({
+    client,
+    table: chaptersTable,
+    row,
+    isNew,
+    includeQuestions,
+    expectedQuestions,
+  })
+  const savedChapter = isNew ? (result.error ? null : { id: chapter.id }) : result.data
+  const saveError = result.error
+  const saveStatus = result.status
+  const saveConflict = Boolean(result.conflict)
   if (saveError) {
     const cleanupErrors = []
     try {
@@ -236,7 +234,7 @@ export async function saveChapter(chapter, notesFile, {
     } catch (cleanupError) {
       cleanupErrors.push(cleanupError.message)
     }
-    throw new Error(`Chapter row save failed: ${saveError.message}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
+    throw new Error(`${formatSupabaseSaveError('Chapter row save failed', saveError, saveStatus)}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`, { cause: saveError })
   }
   if (!savedChapter) {
     const cleanupErrors = []
@@ -250,7 +248,10 @@ export async function saveChapter(chapter, notesFile, {
     } catch (cleanupError) {
       cleanupErrors.push(cleanupError.message)
     }
-    throw new Error(`Chapter questions changed while saving. Reload the latest chapter before publishing.${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
+    const conflictMessage = saveConflict
+      ? 'Chapter questions changed while saving. Reload the latest chapter before publishing.'
+      : 'Chapter row save returned no saved row. Reload the latest chapter before publishing.'
+    throw new Error(`${conflictMessage}${cleanupErrors.length ? ` ${cleanupErrors.join(' ')}` : ''}`)
   }
 
   const { error: restoreError } = await client.from(hiddenChaptersTable).delete().eq('id', chapter.id)
@@ -352,15 +353,21 @@ export async function saveExistingChapterQuestion(chapterId, baselineQuestion, e
       }
     }
 
-    const { data: savedRow, error: saveError } = await client
-      .from(chaptersTable)
-      .update({ questions: mergedQuestions })
-      .eq('id', chapterId)
-      .eq('questions', JSON.stringify(latestQuestions))
-      .select('questions')
-      .maybeSingle()
-    if (saveError) throw new Error(`Question changes could not be saved: ${saveError.message}`)
-    if (!savedRow) {
+    const result = await saveChapterRow({
+      client,
+      table: chaptersTable,
+      row: { id: chapterId, questions: mergedQuestions },
+      isNew: false,
+      includeQuestions: true,
+      expectedQuestions: latestQuestions,
+      returning: 'questions',
+    })
+    if (result.error) {
+      throw new Error(formatSupabaseSaveError('Question changes could not be saved', result.error, result.status), {
+        cause: result.error,
+      })
+    }
+    if (result.conflict || !result.data) {
       throw new Error('The chapter questions changed while this edit was saving. Your changes were not applied; reopen the question and try again.')
     }
     questionChangesSaved = true
@@ -370,7 +377,7 @@ export async function saveExistingChapterQuestion(chapterId, baselineQuestion, e
     } catch (cleanupError) {
       warning = `Question saved, but ${cleanupError.message}`
     }
-    return { questions: savedRow.questions, warning }
+    return { questions: result.data.questions, warning }
   } catch (error) {
     const cleanupErrors = []
     if (!questionChangesSaved) {

@@ -15,6 +15,7 @@ import {
   getChapterPath,
   getSubjectChapters,
 } from '../src/data/biologyData.js'
+import { formatSupabaseSaveError, saveChapterRow } from '../src/lib/chapterRowSave.js'
 import { serializeQuestionImages } from '../src/lib/questionSerialization.js'
 import { replaceExistingQuestion, validateQuestionEdit } from '../src/lib/questionEdits.js'
 import { getOwnedQuestionImageStoragePath } from '../src/lib/storageImagePath.js'
@@ -197,13 +198,18 @@ test('initializes a new question with the current topic as its editable default'
 })
 
 test('uses the default topic only when a pasted question has no explicit topic', () => {
+  const pastedQuestion = parseSingleQuestion(pasteExample).question
+  assert.equal(
+    applyQuestionTopicDefault(pastedQuestion, 'Plant Kingdom').topic,
+    'Bryophytes',
+  )
+  assert.equal(
+    applyQuestionTopicDefault({ ...pastedQuestion, topic: '' }, 'Plant Kingdom').topic,
+    'Plant Kingdom',
+  )
   assert.equal(
     applyQuestionTopicDefault({ topic: '3.1 Algae', question: 'Explicit' }, 'Plant Kingdom').topic,
     '3.1 Algae',
-  )
-  assert.equal(
-    applyQuestionTopicDefault({ topic: '', question: 'No topic' }, 'Plant Kingdom').topic,
-    'Plant Kingdom',
   )
 })
 
@@ -227,7 +233,134 @@ test('propagates question-save errors and rejects appends when chapter edits are
   }), /Save or discard your current question edits/)
 })
 
-test('only extracts cleanup paths from this project’s exact public question-images URLs', () => {
+  test('updates a 43-question chapter without placing its JSONB array in the request URL', async () => {
+    const questions = Array.from({ length: 43 }, (_, index) => ({
+      id: index + 1,
+      question: `Question ${index + 1}?`,
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      correctAnswer: 'Option B',
+      topic: `Topic ${index % 4}`,
+      examCategory: 'NEET',
+      examYear: '2024',
+      explanation: 'A detailed explanation that remains in the saved question.',
+      imageUrl: `https://example.com/questions/${index + 1}.png`,
+      solutionImageUrl: `https://example.com/solutions/${index + 1}.png`,
+    }))
+    const calls = []
+    const latestData = { questions, updated_at: '2026-10-20T10:00:00.000Z' }
+    const client = {
+      from(table) {
+        calls.push(['from', table])
+        return {
+          select(columns) {
+            calls.push(['select', columns])
+            return {
+              eq(field, value) {
+                calls.push(['eq', field, value])
+                return { maybeSingle: async () => ({ data: latestData, error: null, status: 200 }) }
+              },
+            }
+          },
+          update(row) {
+            calls.push(['update', row])
+            return {
+              eq(field, value) {
+                calls.push(['eq', field, value])
+                return {
+                  eq(nextField, nextValue) {
+                    calls.push(['eq', nextField, nextValue])
+                    return {
+                      select(columns) {
+                        calls.push(['select', columns])
+                        return { maybeSingle: async () => ({ data: { id: row.id }, error: null, status: 200 }) }
+                      },
+                    }
+                  },
+                  select(columns) {
+                    calls.push(['select', columns])
+                    return { maybeSingle: async () => ({ data: { id: row.id }, error: null, status: 200 }) }
+                  },
+                }
+              },
+            }
+          },
+        }
+      },
+    }
+
+    const result = await saveChapterRow({
+      client,
+      table: 'biology_chapters',
+      row: { id: 'chapter-43', questions },
+      isNew: false,
+      includeQuestions: true,
+      expectedQuestions: questions,
+    })
+
+    assert.deepEqual(result.data, { id: 'chapter-43' })
+    assert.deepEqual(calls.filter(([kind]) => kind === 'eq').map(([, field]) => field), ['id', 'id', 'updated_at'])
+    assert.equal(calls.some(([kind, field]) => kind === 'eq' && field === 'questions'), false)
+    assert.equal(latestData.questions.length, 43)
+    assert.equal(latestData.questions[0].topic, 'Topic 0')
+    assert.equal(latestData.questions[42].solutionImageUrl, 'https://example.com/solutions/43.png')
+  })
+
+  test('refuses to overwrite questions changed since the editor loaded them', async () => {
+    const calls = []
+    const client = {
+      from() {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  maybeSingle: async () => ({
+                    data: { questions: [{ id: 1, question: 'Changed remotely' }], updated_at: '2026-10-20T10:00:00.000Z' },
+                    error: null,
+                    status: 200,
+                  }),
+                }
+              },
+            }
+          },
+          update() {
+            calls.push('update')
+            throw new Error('Must not update a stale chapter')
+          },
+        }
+      },
+    }
+
+    const result = await saveChapterRow({
+      client,
+      table: 'biology_chapters',
+      row: { id: 'chapter-1', questions: [{ id: 1, question: 'Local edit' }] },
+      isNew: false,
+      includeQuestions: true,
+      expectedQuestions: [{ id: 1, question: 'Original' }],
+    })
+
+    assert.equal(result.conflict, true)
+    assert.equal(calls.includes('update'), false)
+  })
+
+  test('formats Supabase save status, code, message, details, and hint', () => {
+    assert.equal(
+      formatSupabaseSaveError('Chapter row save failed', {
+        code: '23514',
+        message: 'new row violates check constraint',
+        details: 'Failing row contains an invalid chapter number.',
+        hint: 'Use a positive chapter number.',
+      }, 400),
+      'Chapter row save failed (HTTP 400, code 23514): new row violates check constraint Details: Failing row contains an invalid chapter number. Hint: Use a positive chapter number.',
+    )
+    assert.equal(
+      formatSupabaseSaveError('Chapter row save failed', { message: 'Bad Request' }, 400),
+      'Chapter row save failed (HTTP 400): Bad Request',
+    )
+  })
+
+  test('only extracts cleanup paths from this project’s exact public question-images URLs', () => {
   const projectUrl = 'https://project-ref.supabase.co'
   assert.equal(
     getOwnedQuestionImageStoragePath(
